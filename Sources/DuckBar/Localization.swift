@@ -82,4 +82,30 @@ enum L {
     static var tokenChart: String { lang == .korean ? "토큰 (24시간)" : "Tokens (24h)" }
     static var costChart: String { lang == .korean ? "비용 (24시간)" : "Cost (24h)" }
     static var chart: String { lang == .korean ? "차트" : "Chart" }
+
+    // Settings (inline 로컬라이제이션 통합)
+    static var checkForUpdates: String { lang == .korean ? "업데이트 확인..." : "Check for Updates..." }
+    static var setHotkey: String { lang == .korean ? "설정" : "Set" }
+    static var sizeSmall: String { lang == .korean ? "작게" : "Small" }
+    static var sizeMedium: String { lang == .korean ? "보통" : "Medium" }
+    static var sizeLarge: String { lang == .korean ? "크게" : "Large" }
+    static var interval1s: String { lang == .korean ? "1초" : "1s" }
+    static var interval3s: String { lang == .korean ? "3초" : "3s" }
+    static var interval5s: String { lang == .korean ? "5초" : "5s" }
+    static var interval10s: String { lang == .korean ? "10초" : "10s" }
+    static var interval30s: String { lang == .korean ? "30초" : "30s" }
+    static var interval1m: String { lang == .korean ? "1분" : "1m" }
+    static var interval3m: String { lang == .korean ? "3분" : "3m" }
+    static var interval5m: String { lang == .korean ? "5분" : "5m" }
+}
+
+// MARK: - Notification Names
+
+extension Notification.Name {
+    static let hotkeyChanged = Notification.Name("HotkeyChanged")
+    static let hotkeyRecorded = Notification.Name("HotkeyRecorded")
+    static let startRecordingHotkey = Notification.Name("StartRecordingHotkey")
+    static let stopRecordingHotkey = Notification.Name("StopRecordingHotkey")
+    static let openSettings = Notification.Name("OpenSettings")
+    static let openHelp = Notification.Name("OpenHelp")
 }

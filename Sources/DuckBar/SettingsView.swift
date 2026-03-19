@@ -2,6 +2,32 @@ import SwiftUI
 import Carbon.HIToolbox
 import CoreServices
 
+// MARK: - Reusable Segment Picker
+
+struct SegmentButton<T: Hashable>: View {
+    let item: T
+    let isSelected: Bool
+    let title: String
+    let fontSize: CGFloat
+    let padding: CGFloat
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            Text(title)
+                .font(.system(size: fontSize, weight: isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? .white : .primary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, padding)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isSelected ? Color.accentColor : Color.primary.opacity(0.06))
+                )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct SettingsView: View {
     let settings: AppSettings
     var onHelp: (() -> Void)? = nil
@@ -43,7 +69,7 @@ struct SettingsView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 0) {
-                // Language
+                // Language (.id로 언어 변경 시 전체 재렌더링 강제 — L.lang은 SwiftUI observation 밖)
                     VStack(alignment: .leading, spacing: 8) {
                         Label {
                             Text(L.language)
@@ -56,21 +82,10 @@ struct SettingsView: View {
 
                         HStack(spacing: 6) {
                             ForEach(AppLanguage.allCases, id: \.rawValue) { lang in
-                                let isSelected = settings.language == lang
-                                Button(action: { settings.language = lang }) {
-                                    Text(lang.displayName)
-                                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                                        .foregroundStyle(isSelected ? .white : .primary)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 6)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 6)
-                                                .fill(isSelected
-                                                      ? Color.accentColor
-                                                      : Color.primary.opacity(0.06))
-                                        )
+                                SegmentButton(item: lang, isSelected: settings.language == lang,
+                                              title: lang.displayName, fontSize: 12, padding: 6) {
+                                    settings.language = lang
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -92,21 +107,10 @@ struct SettingsView: View {
 
                         HStack(spacing: 6) {
                             ForEach(PopoverSize.allCases, id: \.rawValue) { size in
-                                let isSelected = settings.popoverSize == size
-                                Button(action: { settings.popoverSize = size }) {
-                                    Text(size.displayName)
-                                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                                        .foregroundStyle(isSelected ? .white : .primary)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 6)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 6)
-                                                .fill(isSelected
-                                                      ? Color.accentColor
-                                                      : Color.primary.opacity(0.06))
-                                        )
+                                SegmentButton(item: size, isSelected: settings.popoverSize == size,
+                                              title: size.displayName, fontSize: 12, padding: 6) {
+                                    settings.popoverSize = size
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -163,11 +167,11 @@ struct SettingsView: View {
                                 )
                                 .onTapGesture {
                                     isRecordingHotkey = false
-                                    NotificationCenter.default.post(name: .init("StopRecordingHotkey"), object: nil)
+                                    NotificationCenter.default.post(name: .stopRecordingHotkey, object: nil)
                                 }
                         } else if settings.hotkeyCode == 0 && settings.hotkeyModifiers == 0 {
                             // 미설정 상태
-                            Text(L.lang == .korean ? "설정" : "Set")
+                            Text(L.setHotkey)
                                 .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                                 .padding(.vertical, 5)
@@ -178,7 +182,7 @@ struct SettingsView: View {
                                 )
                                 .onTapGesture {
                                     isRecordingHotkey = true
-                                    NotificationCenter.default.post(name: .init("StartRecordingHotkey"), object: nil)
+                                    NotificationCenter.default.post(name: .startRecordingHotkey, object: nil)
                                 }
                         } else {
                             // 설정된 상태
@@ -188,13 +192,13 @@ struct SettingsView: View {
                                     .foregroundStyle(.primary)
                                     .onTapGesture {
                                         isRecordingHotkey = true
-                                        NotificationCenter.default.post(name: .init("StartRecordingHotkey"), object: nil)
+                                        NotificationCenter.default.post(name: .startRecordingHotkey, object: nil)
                                     }
 
                                 Button(action: {
                                     settings.hotkeyCode = 0
                                     settings.hotkeyModifiers = 0
-                                    NotificationCenter.default.post(name: .init("HotkeyChanged"), object: nil)
+                                    NotificationCenter.default.post(name: .hotkeyChanged, object: nil)
                                 }) {
                                     Image(systemName: "xmark.circle.fill")
                                         .font(.system(size: 11))
@@ -211,7 +215,7 @@ struct SettingsView: View {
                             )
                         }
                     }
-                    .onReceive(NotificationCenter.default.publisher(for: .init("HotkeyRecorded"))) { _ in
+                    .onReceive(NotificationCenter.default.publisher(for: .hotkeyRecorded)) { _ in
                         isRecordingHotkey = false
                     }
                     .padding(.horizontal, 14)
@@ -233,21 +237,10 @@ struct SettingsView: View {
                         let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 4)
                         LazyVGrid(columns: columns, spacing: 6) {
                             ForEach(RefreshInterval.allCases, id: \.rawValue) { interval in
-                                let isSelected = settings.refreshInterval == interval
-                                Button(action: { settings.refreshInterval = interval }) {
-                                    Text(interval.displayName)
-                                        .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
-                                        .foregroundStyle(isSelected ? .white : .primary)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 5)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 6)
-                                                .fill(isSelected
-                                                      ? Color.accentColor
-                                                      : Color.primary.opacity(0.06))
-                                        )
+                                SegmentButton(item: interval, isSelected: settings.refreshInterval == interval,
+                                              title: interval.displayName, fontSize: 11, padding: 5) {
+                                    settings.refreshInterval = interval
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -307,6 +300,7 @@ struct SettingsView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
             }
+            .id(settings.language)
         }
         .frame(width: settings.popoverSize.width)
     }

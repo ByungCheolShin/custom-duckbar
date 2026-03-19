@@ -25,9 +25,9 @@ enum PopoverSize: String, CaseIterable, Codable {
 
     var displayName: String {
         switch self {
-        case .small: L.lang == .korean ? "작게" : "Small"
-        case .medium: L.lang == .korean ? "보통" : "Medium"
-        case .large: L.lang == .korean ? "크게" : "Large"
+        case .small: L.sizeSmall
+        case .medium: L.sizeMedium
+        case .large: L.sizeLarge
         }
     }
 
@@ -70,14 +70,14 @@ enum RefreshInterval: Double, CaseIterable, Codable {
 
     var displayName: String {
         switch self {
-        case .one: L.lang == .korean ? "1초" : "1s"
-        case .three: L.lang == .korean ? "3초" : "3s"
-        case .five: L.lang == .korean ? "5초" : "5s"
-        case .ten: L.lang == .korean ? "10초" : "10s"
-        case .thirty: L.lang == .korean ? "30초" : "30s"
-        case .sixty: L.lang == .korean ? "1분" : "1m"
-        case .oneEighty: L.lang == .korean ? "3분" : "3m"
-        case .threeHundred: L.lang == .korean ? "5분" : "5m"
+        case .one: L.interval1s
+        case .three: L.interval3s
+        case .five: L.interval5s
+        case .ten: L.interval10s
+        case .thirty: L.interval30s
+        case .sixty: L.interval1m
+        case .oneEighty: L.interval3m
+        case .threeHundred: L.interval5m
         }
     }
 }

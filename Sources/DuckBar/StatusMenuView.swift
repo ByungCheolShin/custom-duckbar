@@ -29,16 +29,11 @@ struct StatusMenuView: View {
         }
         .frame(width: popoverWidth)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onReceive(NotificationCenter.default.publisher(for: .init("OpenSettings"))) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
             viewMode = .settings
         }
-        .onReceive(NotificationCenter.default.publisher(for: .init("OpenHelp"))) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .openHelp)) { _ in
             viewMode = .help
-        }
-        .onChange(of: viewMode) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                NotificationCenter.default.post(name: .init("ResizePopover"), object: nil)
-            }
         }
     }
 
@@ -278,9 +273,6 @@ struct StatusMenuView: View {
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     showChart.toggle()
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                    NotificationCenter.default.post(name: .init("ResizePopover"), object: nil)
                 }
             }) {
                 HStack {

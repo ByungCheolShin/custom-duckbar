@@ -19,6 +19,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var currentAnimationFrame: Int = 0
     private var animationDirection: Int = 1
     private var hotKey: HotKey?
+    private struct ImageCacheKey: Hashable {
+        let frame: Int
+        let template: Bool
+        let colorName: String?
+    }
+    private var imageCache: [ImageCacheKey: NSImage] = [:]
     private var recordingMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -28,7 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 메뉴바 아이템 설정
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            button.image = makeDuckFeetImage(frame: 0, color: nil, template: true)
+            button.image = cachedDuckFeetImage(frame: 0, color: nil, template: true)
             button.imagePosition = .imageLeading
             button.action = #selector(statusItemClicked)
             button.target = self
@@ -52,14 +58,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // 팝오버 리사이즈 알림 감지
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(resizePopover),
-            name: NSNotification.Name("ResizePopover"),
-            object: nil
-        )
-
         // 다크모드 전환 감지
         DistributedNotificationCenter.default().addObserver(
             self,
@@ -75,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(hotkeyChanged),
-            name: NSNotification.Name("HotkeyChanged"),
+            name: .hotkeyChanged,
             object: nil
         )
 
@@ -83,13 +81,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(startRecordingHotkey),
-            name: NSNotification.Name("StartRecordingHotkey"),
+            name: .startRecordingHotkey,
             object: nil
         )
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(stopRecordingHotkey),
-            name: NSNotification.Name("StopRecordingHotkey"),
+            name: .stopRecordingHotkey,
             object: nil
         )
     }
@@ -99,10 +97,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateTimer?.invalidate()
         animationTimer?.invalidate()
         hotKey = nil
-    }
-
-    @objc private func resizePopover() {
-        // sizingOptions = .preferredContentSize 사용 시 SwiftUI가 자동 크기 조정
     }
 
     @objc private func hotkeyChanged() {
@@ -139,10 +133,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings.hotkeyModifiers = modifiers.intersection(.deviceIndependentFlagsMask).rawValue
         }
         setupHotkey()
-        NotificationCenter.default.post(name: .init("HotkeyRecorded"), object: nil)
+        NotificationCenter.default.post(name: .hotkeyRecorded, object: nil)
     }
 
     @objc private func appearanceChanged() {
+        imageCache.removeAll()
         lastRenderedState = nil // 강제 아이콘 재렌더
         updateMenuBarIcon()
     }
@@ -183,7 +178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshItem.target = self
         menu.addItem(refreshItem)
 
-        let checkUpdateItem = NSMenuItem(title: L.lang == .korean ? "업데이트 확인..." : "Check for Updates...", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "u")
+        let checkUpdateItem = NSMenuItem(title: L.checkForUpdates, action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "u")
         checkUpdateItem.target = updaterController
         menu.addItem(checkUpdateItem)
 
@@ -215,12 +210,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettingsAction() {
-        NotificationCenter.default.post(name: .init("OpenSettings"), object: nil)
+        NotificationCenter.default.post(name: .openSettings, object: nil)
         togglePopover()
     }
 
     @objc private func openHelpAction() {
-        NotificationCenter.default.post(name: .init("OpenHelp"), object: nil)
+        NotificationCenter.default.post(name: .openHelp, object: nil)
         togglePopover()
     }
 
@@ -291,10 +286,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if let color = tintColor {
-            button.image = makeDuckFeetImage(frame: currentAnimationFrame, color: color, template: false)
+            button.image = cachedDuckFeetImage(frame: currentAnimationFrame, color: color, template: false)
             button.contentTintColor = color
         } else {
-            button.image = makeDuckFeetImage(frame: 0, color: nil, template: true)
+            button.image = cachedDuckFeetImage(frame: 0, color: nil, template: true)
             button.contentTintColor = nil
         }
 
@@ -365,6 +360,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         (0, 5), (3, 5), (6, 5),
     ]
 
+    private static func colorName(for color: NSColor?) -> String? {
+        guard let color else { return nil }
+        if color == .systemGreen { return "green" }
+        if color == .systemOrange { return "orange" }
+        if color == .systemBlue { return "blue" }
+        return "other"
+    }
+
+    private func cachedDuckFeetImage(frame: Int, color: NSColor?, template: Bool) -> NSImage {
+        let key = ImageCacheKey(frame: frame, template: template, colorName: Self.colorName(for: color))
+        if let cached = imageCache[key] { return cached }
+        let image = makeDuckFeetImage(frame: frame, color: color, template: template)
+        imageCache[key] = image
+        return image
+    }
+
     /// 오리발 픽셀아트 메뉴바 이미지 생성
     private func makeDuckFeetImage(frame: Int, color: NSColor?, template: Bool) -> NSImage {
         let size = NSSize(width: 18, height: 18)
@@ -406,7 +417,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.currentAnimationFrame += self.animationDirection
                 if self.currentAnimationFrame >= 2 { self.animationDirection = -1 }
                 if self.currentAnimationFrame <= 0 { self.animationDirection = 1 }
-                button.image = self.makeDuckFeetImage(
+                button.image = self.cachedDuckFeetImage(
                     frame: self.currentAnimationFrame,
                     color: .systemGreen,
                     template: false
