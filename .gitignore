@@ -1,0 +1,6 @@
+.DS_Store
+.build/
+.omc/
+.claude/
+*.xcuserdata
+*.xcworkspace
