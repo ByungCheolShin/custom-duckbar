@@ -138,6 +138,14 @@ final class AppSettings {
         didSet { save() }
     }
 
+    var hotkeyCode: UInt16 {
+        didSet { save() }
+    }
+
+    var hotkeyModifiers: UInt {
+        didSet { save() }
+    }
+
     var launchAtLogin: Bool {
         didSet {
             do {
@@ -184,6 +192,18 @@ final class AppSettings {
             refreshInterval = .five
         }
 
+        if let raw = defaults.object(forKey: "hotkeyCode") as? Int {
+            hotkeyCode = UInt16(raw)
+        } else {
+            hotkeyCode = 80  // F19
+        }
+
+        if let raw = defaults.object(forKey: "hotkeyModifiers") as? UInt {
+            hotkeyModifiers = raw
+        } else {
+            hotkeyModifiers = 0
+        }
+
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 
@@ -194,5 +214,7 @@ final class AppSettings {
         }
         defaults.set(popoverSize.rawValue, forKey: "popoverSize")
         defaults.set(String(refreshInterval.rawValue), forKey: "refreshInterval")
+        defaults.set(Int(hotkeyCode), forKey: "hotkeyCode")
+        defaults.set(hotkeyModifiers, forKey: "hotkeyModifiers")
     }
 }

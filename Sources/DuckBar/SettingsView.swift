@@ -1,9 +1,12 @@
 import SwiftUI
+import Carbon.HIToolbox
+import CoreServices
 
 struct SettingsView: View {
     let settings: AppSettings
     var onHelp: (() -> Void)? = nil
     let onDone: () -> Void
+    @State private var isRecordingHotkey = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -136,6 +139,86 @@ struct SettingsView: View {
 
                     Divider()
 
+                    // Hotkey
+                    HStack {
+                        Label {
+                            Text(L.hotkey)
+                                .font(.system(size: 12))
+                        } icon: {
+                            Image(systemName: "keyboard")
+                                .font(.system(size: 10))
+                        }
+
+                        Spacer()
+
+                        if isRecordingHotkey {
+                            Text(L.hotkeyRecord)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.orange)
+                                .padding(.vertical, 5)
+                                .padding(.horizontal, 12)
+                                .background(
+                                    Capsule()
+                                        .strokeBorder(Color.orange, lineWidth: 1.5)
+                                )
+                                .onTapGesture {
+                                    isRecordingHotkey = false
+                                    NotificationCenter.default.post(name: .init("StopRecordingHotkey"), object: nil)
+                                }
+                        } else if settings.hotkeyCode == 0 && settings.hotkeyModifiers == 0 {
+                            // 미설정 상태
+                            Text(L.lang == .korean ? "설정" : "Set")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 5)
+                                .padding(.horizontal, 14)
+                                .background(
+                                    Capsule()
+                                        .strokeBorder(Color.primary.opacity(0.2), lineWidth: 1)
+                                )
+                                .onTapGesture {
+                                    isRecordingHotkey = true
+                                    NotificationCenter.default.post(name: .init("StartRecordingHotkey"), object: nil)
+                                }
+                        } else {
+                            // 설정된 상태
+                            HStack(spacing: 4) {
+                                Text(hotkeyDisplayString())
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(.primary)
+                                    .onTapGesture {
+                                        isRecordingHotkey = true
+                                        NotificationCenter.default.post(name: .init("StartRecordingHotkey"), object: nil)
+                                    }
+
+                                Button(action: {
+                                    settings.hotkeyCode = 0
+                                    settings.hotkeyModifiers = 0
+                                    NotificationCenter.default.post(name: .init("HotkeyChanged"), object: nil)
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.vertical, 5)
+                            .padding(.leading, 12)
+                            .padding(.trailing, 8)
+                            .background(
+                                Capsule()
+                                    .strokeBorder(Color.primary.opacity(0.3), lineWidth: 1)
+                            )
+                        }
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: .init("HotkeyRecorded"))) { _ in
+                        isRecordingHotkey = false
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+
+                    Divider()
+
                     // Refresh Interval
                     VStack(alignment: .leading, spacing: 8) {
                         Label {
@@ -226,6 +309,69 @@ struct SettingsView: View {
             }
         }
         .frame(width: settings.popoverSize.width)
+    }
+
+    private func hotkeyDisplayString() -> String {
+        let code = settings.hotkeyCode
+        let mods = NSEvent.ModifierFlags(rawValue: settings.hotkeyModifiers)
+        if code == 0 && settings.hotkeyModifiers == 0 { return "—" }
+
+        var parts: [String] = []
+        if mods.contains(.control) { parts.append("⌃") }
+        if mods.contains(.option) { parts.append("⌥") }
+        if mods.contains(.shift) { parts.append("⇧") }
+        if mods.contains(.command) { parts.append("⌘") }
+        parts.append(keyName(for: code))
+        return parts.joined()
+    }
+
+    private func keyName(for code: UInt16) -> String {
+        // 비인쇄 키만 하드코딩
+        let special: [UInt16: String] = [
+            // Function keys (UCKeyTranslate가 PUA 문자를 반환하므로 직접 매핑)
+            62: "F1", 63: "F2", 64: "F3", 65: "F4", 66: "F5", 67: "F6",
+            68: "F7", 69: "F8", 70: "F9", 71: "F10", 72: "F11", 73: "F12",
+            74: "F13", 75: "F14", 76: "F15", 77: "F16", 78: "F17", 79: "F18", 80: "F19",
+            // 특수 키
+            36: "↩", 48: "⇥", 49: "Space", 51: "⌫", 53: "Esc", 117: "⌦",
+            // 방향 키
+            123: "←", 124: "→", 125: "↓", 126: "↑",
+            // 내비게이션
+            115: "Home", 119: "End", 116: "PgUp", 121: "PgDn",
+        ]
+        if let name = special[code] { return name }
+
+        // 나머지: UCKeyTranslate로 현재 키보드 레이아웃에서 자동 변환
+        guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
+              let rawPtr = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
+            return "Key \(code)"
+        }
+        let layoutData = unsafeBitCast(rawPtr, to: CFData.self) as Data
+        var deadKeyState: UInt32 = 0
+        let maxChars = 4
+        var chars = [UniChar](repeating: 0, count: maxChars)
+        var length = 0
+
+        let error = layoutData.withUnsafeBytes { pointer -> OSStatus in
+            guard let baseAddress = pointer.bindMemory(to: UCKeyboardLayout.self).baseAddress else {
+                return errSecAllocate
+            }
+            return CoreServices.UCKeyTranslate(
+                baseAddress,
+                code,
+                UInt16(CoreServices.kUCKeyActionDisplay),
+                0,
+                UInt32(LMGetKbdType()),
+                OptionBits(CoreServices.kUCKeyTranslateNoDeadKeysBit),
+                &deadKeyState,
+                maxChars,
+                &length,
+                &chars
+            )
+        }
+
+        guard error == noErr, length > 0 else { return "Key \(code)" }
+        return (NSString(characters: &chars, length: length) as String).uppercased()
     }
 
     private func previewText(for item: StatusBarItem) -> String {

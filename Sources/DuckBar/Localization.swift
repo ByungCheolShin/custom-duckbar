@@ -75,6 +75,8 @@ enum L {
     static var done: String { lang == .korean ? "완료" : "Done" }
     static var launchAtLogin: String { lang == .korean ? "시스템 시작 시 실행" : "Launch at Login" }
     static var refreshInterval: String { lang == .korean ? "데이터 갱신 주기" : "Refresh Interval" }
+    static var hotkey: String { lang == .korean ? "단축키" : "Hotkey" }
+    static var hotkeyRecord: String { lang == .korean ? "키를 누르세요..." : "Press a key..." }
 
     // Chart
     static var tokenChart: String { lang == .korean ? "토큰 (24시간)" : "Tokens (24h)" }

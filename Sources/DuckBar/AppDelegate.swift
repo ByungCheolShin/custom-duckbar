@@ -17,6 +17,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var animationTimer: Timer?
     private var currentAnimationFrame: Int = 0
     private var animationDirection: Int = 1
+    private var globalHotkeyMonitor: Any?
+    private var localHotkeyMonitor: Any?
+    private var recordingMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
@@ -64,21 +67,118 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSNotification.Name("AppleInterfaceThemeChangedNotification"),
             object: nil
         )
+
+        // 글로벌 핫키
+        setupHotkey()
+
+        // 핫키 변경 감지
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(hotkeyChanged),
+            name: NSNotification.Name("HotkeyChanged"),
+            object: nil
+        )
+
+        // 핫키 녹음 시작 감지
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(startRecordingHotkey),
+            name: NSNotification.Name("StartRecordingHotkey"),
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(stopRecordingHotkey),
+            name: NSNotification.Name("StopRecordingHotkey"),
+            object: nil
+        )
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         monitor.stop()
         updateTimer?.invalidate()
         animationTimer?.invalidate()
+        if let monitor = globalHotkeyMonitor { NSEvent.removeMonitor(monitor) }
+        if let monitor = localHotkeyMonitor { NSEvent.removeMonitor(monitor) }
     }
 
     @objc private func resizePopover() {
         // sizingOptions = .preferredContentSize 사용 시 SwiftUI가 자동 크기 조정
     }
 
+    @objc private func hotkeyChanged() {
+        setupHotkey()
+    }
+
+    @objc private func startRecordingHotkey() {
+        // 녹음 중에는 기존 핫키 모니터 해제
+        if let monitor = globalHotkeyMonitor { NSEvent.removeMonitor(monitor) }
+        if let monitor = localHotkeyMonitor { NSEvent.removeMonitor(monitor) }
+        globalHotkeyMonitor = nil
+        localHotkeyMonitor = nil
+
+        recordingMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            if event.keyCode == 53 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty {
+                self.finishRecording(keyCode: nil)
+                return nil
+            }
+            self.finishRecording(keyCode: event.keyCode, modifiers: event.modifierFlags)
+            return nil
+        }
+    }
+
+    @objc private func stopRecordingHotkey() {
+        if let monitor = recordingMonitor { NSEvent.removeMonitor(monitor) }
+        recordingMonitor = nil
+        setupHotkey()
+    }
+
+    private func finishRecording(keyCode: UInt16?, modifiers: NSEvent.ModifierFlags = []) {
+        if let monitor = recordingMonitor { NSEvent.removeMonitor(monitor) }
+        recordingMonitor = nil
+
+        if let keyCode {
+            settings.hotkeyCode = keyCode
+            settings.hotkeyModifiers = modifiers.intersection(.deviceIndependentFlagsMask).rawValue
+        }
+        setupHotkey()
+        NotificationCenter.default.post(name: .init("HotkeyRecorded"), object: nil)
+    }
+
     @objc private func appearanceChanged() {
         lastRenderedState = nil // 강제 아이콘 재렌더
         updateMenuBarIcon()
+    }
+
+    private func setupHotkey() {
+        // 기존 모니터 제거
+        if let monitor = globalHotkeyMonitor { NSEvent.removeMonitor(monitor) }
+        if let monitor = localHotkeyMonitor { NSEvent.removeMonitor(monitor) }
+
+        let keyCode = settings.hotkeyCode
+        let requiredModifiers = NSEvent.ModifierFlags(rawValue: settings.hotkeyModifiers)
+            .intersection(.deviceIndependentFlagsMask)
+
+        globalHotkeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let eventMods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if event.keyCode == keyCode && eventMods == requiredModifiers {
+                Task { @MainActor in
+                    self?.togglePopover()
+                }
+            }
+        }
+
+        localHotkeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let eventMods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if event.keyCode == keyCode && eventMods == requiredModifiers {
+                Task { @MainActor in
+                    self?.togglePopover()
+                }
+                return nil
+            }
+            return event
+        }
     }
 
     @objc private func statusItemClicked() {
