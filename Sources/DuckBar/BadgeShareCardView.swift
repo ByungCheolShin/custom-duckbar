@@ -92,14 +92,15 @@ struct BadgeShareCardView: View {
                         Text(badge.icon)
                             .font(.system(size: 20))
                             .opacity(badge.isAchieved ? 1.0 : 0.15)
-                        Text(badge.name)
+                        Text(badge.localizedName)
                             .font(.system(size: 9, weight: .medium))
                             .foregroundStyle(badge.isAchieved ? .primary : .tertiary)
                             .lineLimit(1)
-                        Text(badge.description)
+                        Text(badge.localizedDescription)
                             .font(.system(size: 8))
                             .foregroundStyle(badge.isAchieved ? .secondary : .quaternary)
-                            .lineLimit(1)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity)
                 }

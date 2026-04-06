@@ -172,6 +172,12 @@ struct RateLimits: Equatable {
     var sonnetWeeklyResetsAt: Date?
     var opusWeeklyPercent: Double?
     var opusWeeklyResetsAt: Date?
+    var extraUsageLoaded: Bool = false  // API에서 extra_usage 필드를 받은 경우만 true
+    var extraUsageEnabled: Bool = false
+    var extraUsageUsed: Double?      // USD
+    var extraUsageLimit: Double?     // USD
+    var extraUsageUtilization: Double?  // 0~100
+    var extraUsageResetsAt: Date?
 
     var fiveHourResetString: String {
         guard let date = fiveHourResetsAt else { return "-" }
@@ -186,9 +192,15 @@ struct RateLimits: Equatable {
     private func formatTimeRemaining(until date: Date) -> String {
         let remaining = date.timeIntervalSince(Date())
         if remaining <= 0 { return "now" }
-        let hours = Int(remaining / 3600)
+        let totalHours = Int(remaining / 3600)
         let minutes = Int(remaining.truncatingRemainder(dividingBy: 3600) / 60)
-        if hours > 0 { return "\(hours)h \(minutes)m" }
+        if UserDefaults.standard.bool(forKey: "showDaysFormat") && totalHours >= 24 {
+            let days = totalHours / 24
+            let hours = totalHours % 24
+            if hours > 0 { return "\(days)d \(hours)h" }
+            return "\(days)d"
+        }
+        if totalHours > 0 { return "\(totalHours)h \(minutes)m" }
         return "\(minutes)m"
     }
 }
@@ -329,11 +341,16 @@ struct Badge: Identifiable, Equatable {
     let id: String
     let icon: String
     let name: String
+    let nameEn: String
     let description: String
+    let descriptionEn: String
     let category: BadgeCategory
     var achievedAt: Date?
 
     var isAchieved: Bool { achievedAt != nil }
+
+    var localizedName: String { L.lang == .korean ? name : nameEn }
+    var localizedDescription: String { L.lang == .korean ? description : descriptionEn }
 
     enum BadgeCategory {
         case dailyPeak   // 일간 최고 기록

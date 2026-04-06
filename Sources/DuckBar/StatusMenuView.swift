@@ -280,6 +280,51 @@ struct StatusMenuView: View {
                         .frame(width: 60 * s, alignment: .trailing)
                 }
             }
+
+            // Extra Usage (API에서 extra_usage 받은 경우만 표시)
+            if rl.extraUsageLoaded {
+                HStack(spacing: 6) {
+                    Text("Ex")
+                        .font(.system(size: 10 * s, weight: .medium))
+                        .frame(width: 20 * s, alignment: .trailing)
+                    if rl.extraUsageEnabled {
+                        let util = rl.extraUsageUtilization ?? 0
+                        ProgressBarView(
+                            value: util / 100,
+                            color: progressColor(util)
+                        )
+                        if let used = rl.extraUsageUsed, let limit = rl.extraUsageLimit {
+                            Text("$\(String(format: "%.2f", used))/$\(String(format: "%.0f", limit))")
+                                .font(.system(size: 9 * s, weight: .medium, design: .monospaced))
+                                .foregroundStyle(progressColor(util))
+                                .frame(width: 92 * s, alignment: .trailing)
+                        } else if let resetDate = rl.extraUsageResetsAt {
+                            Text("↻ \(formatResetDate(resetDate))")
+                                .font(.system(size: 9 * s))
+                                .foregroundStyle(.tertiary)
+                                .frame(width: 92 * s, alignment: .trailing)
+                        } else {
+                            Text("\(Int(util))%")
+                                .font(.system(size: 10 * s, weight: .medium, design: .monospaced))
+                                .foregroundStyle(progressColor(util))
+                                .frame(width: 32 * s, alignment: .trailing)
+                            Text(L.monthly)
+                                .font(.system(size: 9 * s))
+                                .foregroundStyle(.tertiary)
+                                .frame(width: 60 * s, alignment: .trailing)
+                        }
+                    } else {
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.06))
+                            .frame(height: 5 * s)
+                            .clipShape(Capsule())
+                        Text(L.extraUsageDisabled)
+                            .font(.system(size: 9 * s))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 92 * s, alignment: .trailing)
+                    }
+                }
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -471,6 +516,12 @@ struct StatusMenuView: View {
     }
 
     // MARK: - Helpers
+
+    private func formatResetDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter.string(from: date)
+    }
 
     private func progressColor(_ percent: Double) -> Color {
         if percent >= 80 { return .red }

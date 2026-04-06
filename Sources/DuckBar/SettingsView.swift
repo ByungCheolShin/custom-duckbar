@@ -266,6 +266,30 @@ struct SettingsView: View {
 
                     Divider()
 
+                    // 남은 시간 일 단위 표시
+                    HStack {
+                        Label {
+                            Text(L.showDaysFormat)
+                                .font(.system(size: 12))
+                        } icon: {
+                            Image(systemName: "clock")
+                                .font(.system(size: 10))
+                        }
+
+                        Spacer()
+
+                        Toggle("", isOn: Binding(
+                            get: { settings.showDaysFormat },
+                            set: { settings.showDaysFormat = $0 }
+                        ))
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+
+                    Divider()
+
                     // 사용량 알림
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
@@ -645,6 +669,7 @@ struct SettingsView: View {
         case .cost: "$1.23"
         case .weeklyCost: "$15.40"
         case .context: "ctx 65%"
+        case .extraUsage: "ex $13/$20"
         }
     }
 }

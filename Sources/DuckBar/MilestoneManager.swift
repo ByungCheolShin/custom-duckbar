@@ -9,21 +9,21 @@ final class MilestoneManager {
 
     static let allBadges: [Badge] = [
         // Daily peak / 일간 최고 기록
-        Badge(id: "daily_1m",   icon: "🌱", name: "워밍업",    description: "하루 1M 토큰",   category: .dailyPeak),
-        Badge(id: "daily_10m",  icon: "🔥", name: "집중모드",  description: "하루 10M 토큰",  category: .dailyPeak),
-        Badge(id: "daily_50m",  icon: "⚡", name: "올인",      description: "하루 50M 토큰",  category: .dailyPeak),
-        Badge(id: "daily_100m", icon: "💥", name: "미친하루",  description: "하루 100M 토큰", category: .dailyPeak),
-        Badge(id: "daily_500m", icon: "👑", name: "전설의하루", description: "하루 500M 토큰", category: .dailyPeak),
+        Badge(id: "daily_1m",   icon: "🌱", name: "워밍업",     nameEn: "Warm Up",      description: "하루 1M 토큰",    descriptionEn: "1M tokens in a day",   category: .dailyPeak),
+        Badge(id: "daily_10m",  icon: "🔥", name: "집중모드",   nameEn: "Focus Mode",   description: "하루 10M 토큰",   descriptionEn: "10M tokens in a day",  category: .dailyPeak),
+        Badge(id: "daily_50m",  icon: "⚡", name: "올인",       nameEn: "All In",       description: "하루 50M 토큰",   descriptionEn: "50M tokens in a day",  category: .dailyPeak),
+        Badge(id: "daily_100m", icon: "💥", name: "미친하루",   nameEn: "Crazy Day",    description: "하루 100M 토큰",  descriptionEn: "100M tokens in a day", category: .dailyPeak),
+        Badge(id: "daily_500m", icon: "👑", name: "전설의하루", nameEn: "Legendary",    description: "하루 500M 토큰",  descriptionEn: "500M tokens in a day", category: .dailyPeak),
         // Streak / 연속 사용
-        Badge(id: "streak_3",   icon: "🌤", name: "시작",  description: "3일 연속 사용",   category: .streak),
-        Badge(id: "streak_7",   icon: "📅", name: "습관",  description: "7일 연속 사용",   category: .streak),
-        Badge(id: "streak_30",  icon: "🗓", name: "루틴",  description: "30일 연속 사용",  category: .streak),
-        Badge(id: "streak_100", icon: "🏆", name: "중독",  description: "100일 연속 사용", category: .streak),
+        Badge(id: "streak_3",   icon: "🌤", name: "시작",  nameEn: "Starter",   description: "3일 연속 사용",   descriptionEn: "3-day streak",   category: .streak),
+        Badge(id: "streak_7",   icon: "📅", name: "습관",  nameEn: "Habit",     description: "7일 연속 사용",   descriptionEn: "7-day streak",   category: .streak),
+        Badge(id: "streak_30",  icon: "🗓", name: "루틴",  nameEn: "Routine",   description: "30일 연속 사용",  descriptionEn: "30-day streak",  category: .streak),
+        Badge(id: "streak_100", icon: "🏆", name: "중독",  nameEn: "Addicted",  description: "100일 연속 사용", descriptionEn: "100-day streak", category: .streak),
         // Cumulative cost / 누적 비용
-        Badge(id: "cost_100",   icon: "💰", name: "첫 투자", description: "누적 $100",    category: .totalCost),
-        Badge(id: "cost_1000",  icon: "💳", name: "헤비유저", description: "누적 $1,000",  category: .totalCost),
-        Badge(id: "cost_5000",  icon: "💸", name: "큰손",    description: "누적 $5,000",  category: .totalCost),
-        Badge(id: "cost_10000", icon: "🤑", name: "VIP",    description: "누적 $10,000", category: .totalCost),
+        Badge(id: "cost_100",   icon: "💰", name: "첫 투자",  nameEn: "First Investment", description: "누적 $100",    descriptionEn: "Total $100",    category: .totalCost),
+        Badge(id: "cost_1000",  icon: "💳", name: "헤비유저", nameEn: "Heavy User",       description: "누적 $1,000",  descriptionEn: "Total $1,000",  category: .totalCost),
+        Badge(id: "cost_5000",  icon: "💸", name: "큰손",    nameEn: "Big Spender",      description: "누적 $5,000",  descriptionEn: "Total $5,000",  category: .totalCost),
+        Badge(id: "cost_10000", icon: "🤑", name: "VIP",    nameEn: "VIP",               description: "누적 $10,000", descriptionEn: "Total $10,000", category: .totalCost),
     ]
 
     // MARK: - UserDefaults Keys
@@ -91,8 +91,8 @@ final class MilestoneManager {
         UserDefaults.standard.set(Date(), forKey: achievedDateKey(id))
 
         guard let badge = MilestoneManager.allBadges.first(where: { $0.id == id }) else { return }
-        let title = "\(badge.icon) 뱃지 달성: \(badge.name)"
-        let body = badge.description
+        let title = "\(badge.icon) 뱃지 달성: \(badge.localizedName)"
+        let body = badge.localizedDescription
         sendNotification(title: title, body: body, badgeId: id)
         NotificationHistoryManager.shared.addMilestone(title: title, body: body)
     }

@@ -1,4 +1,5 @@
 import Foundation
+import CommonCrypto
 
 struct SessionDiscovery {
     private let claudeDir: URL
@@ -580,12 +581,32 @@ struct SessionDiscovery {
         if let resetStr = cacheData["opusWeeklyResetsAt"] as? String {
             stats.rateLimits.opusWeeklyResetsAt = parseISO8601(resetStr)
         }
+        if let enabled = cacheData["extraUsageEnabled"] as? Bool {
+            stats.rateLimits.extraUsageLoaded = true
+            stats.rateLimits.extraUsageEnabled = enabled
+        }
+        if let used = cacheData["extraUsageUsed"] as? Double {
+            stats.rateLimits.extraUsageUsed = used
+        }
+        if let limit = cacheData["extraUsageLimit"] as? Double {
+            stats.rateLimits.extraUsageLimit = limit
+        }
+        if let util = cacheData["extraUsageUtilization"] as? Double {
+            stats.rateLimits.extraUsageUtilization = util
+        }
+        if let resetStr = cacheData["extraUsageResetsAt"] as? String {
+            stats.rateLimits.extraUsageResetsAt = parseISO8601(resetStr)
+        }
     }
 
     private func loadRateLimitsFromCache(_ stats: inout UsageStats) {
-        // 1. 로컬 캐시가 신선하면(5분 이내) 그대로 사용 — API 호출 없음
+        // 1. 로컬 캐시가 신선하면(5분 이내) 그대로 사용
         if let local = loadLocalCache(), local.fresh {
             applyRateLimitsData(local.data, to: &stats)
+            // extra_usage 없으면 API 보완 호출
+            if !stats.rateLimits.extraUsageLoaded {
+                fetchRateLimitsFromAPI(&stats)
+            }
             return
         }
 
@@ -598,6 +619,10 @@ struct SessionDiscovery {
            let cacheData = json["data"] as? [String: Any] {
             applyRateLimitsData(cacheData, to: &stats)
             saveRateLimitsCache(cacheData)
+            // OMC 캐시엔 extra_usage가 없으므로 추가로 API 호출해서 보완
+            if !stats.rateLimits.extraUsageLoaded {
+                fetchRateLimitsFromAPI(&stats)
+            }
             return
         }
 
@@ -658,6 +683,31 @@ struct SessionDiscovery {
             }
         }
 
+        if let extraUsage = json["extra_usage"] as? [String: Any] {
+            let enabled = extraUsage["is_enabled"] as? Bool ?? false
+            cacheData["extraUsageEnabled"] = enabled
+            stats.rateLimits.extraUsageLoaded = true
+            stats.rateLimits.extraUsageEnabled = enabled
+            if let used = extraUsage["used_credits"] as? Double {
+                let usedUSD = used / 100.0
+                cacheData["extraUsageUsed"] = usedUSD
+                stats.rateLimits.extraUsageUsed = usedUSD
+            }
+            if let limit = extraUsage["monthly_limit"] as? Double {
+                let limitUSD = limit / 100.0
+                cacheData["extraUsageLimit"] = limitUSD
+                stats.rateLimits.extraUsageLimit = limitUSD
+            }
+            if let util = extraUsage["utilization"] as? Double {
+                cacheData["extraUsageUtilization"] = util
+                stats.rateLimits.extraUsageUtilization = util
+            }
+            if let resetStr = extraUsage["resets_at"] as? String {
+                cacheData["extraUsageResetsAt"] = resetStr
+                stats.rateLimits.extraUsageResetsAt = parseISO8601(resetStr)
+            }
+        }
+
         if !cacheData.isEmpty {
             stats.rateLimits.isLoaded = true
             saveRateLimitsCache(cacheData)
@@ -665,21 +715,20 @@ struct SessionDiscovery {
     }
 
     private func readOAuthToken() -> String? {
-        // macOS Keychain에서 읽기
+        // 1. Claude Code 키체인 시도
+        if let token = readClaudeCodeToken() { return token }
+        // 2. Claude.app config.json 시도 (Claude Code 없는 경우)
+        return readClaudeAppToken()
+    }
+
+    private func readClaudeCodeToken() -> String? {
         let pipe = Pipe()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = [
-            "find-generic-password", "-s", "Claude Code-credentials", "-w"
-        ]
+        process.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch { return nil }
-
+        do { try process.run(); process.waitUntilExit() } catch { return nil }
         guard process.terminationStatus == 0 else { return nil }
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
@@ -688,11 +737,85 @@ struct SessionDiscovery {
               let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
         else { return nil }
 
-        // claudeAiOauth 래퍼 또는 직접 accessToken
         if let oauth = json["claudeAiOauth"] as? [String: Any] {
             return oauth["accessToken"] as? String
         }
         return json["accessToken"] as? String
+    }
+
+    /// Claude.app의 config.json에서 암호화된 OAuth 토큰을 복호화해 반환
+    private func readClaudeAppToken() -> String? {
+        // 1. config.json에서 암호화된 tokenCache 읽기
+        let configURL = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Claude/config.json")
+        guard let configData = try? Data(contentsOf: configURL),
+              let config = try? JSONSerialization.jsonObject(with: configData) as? [String: Any],
+              let encryptedB64 = config["oauth:tokenCache"] as? String,
+              let encrypted = Data(base64Encoded: encryptedB64),
+              encrypted.count > 19,
+              encrypted.prefix(3) == Data("v10".utf8)
+        else { return nil }
+
+        // 2. "Claude Safe Storage" 키체인에서 마스터 키 읽기
+        let pipe = Pipe()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = ["find-generic-password", "-s", "Claude Safe Storage", "-w"]
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do { try process.run(); process.waitUntilExit() } catch { return nil }
+        guard process.terminationStatus == 0 else { return nil }
+
+        let keyData = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let masterKey = String(data: keyData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
+
+        // 3. PBKDF2-SHA1로 AES 키 유도 (Electron 표준)
+        var aesKey = [UInt8](repeating: 0, count: 16)
+        let salt = Array("saltysalt".utf8)
+        let masterKeyBytes = Array(masterKey.utf8)
+        let pbkdf2Result = CCKeyDerivationPBKDF(
+            CCPBKDFAlgorithm(kCCPBKDF2),
+            masterKeyBytes, masterKeyBytes.count,
+            salt, salt.count,
+            CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA1),
+            1003,
+            &aesKey, aesKey.count
+        )
+        guard pbkdf2Result == kCCSuccess else { return nil }
+
+        // 4. AES-CBC 복호화 (IV = 0x20 * 16, ciphertext = encrypted[3:])
+        let ciphertext = encrypted.dropFirst(3)
+        let iv = [UInt8](repeating: 0x20, count: 16)  // space * 16
+        var plaintext = [UInt8](repeating: 0, count: ciphertext.count + kCCBlockSizeAES128)
+        var plaintextLen = 0
+
+        let cipherBytes = Array(ciphertext)
+        let decryptResult = CCCrypt(
+            CCOperation(kCCDecrypt),
+            CCAlgorithm(kCCAlgorithmAES),
+            CCOptions(kCCOptionPKCS7Padding),
+            aesKey, aesKey.count,
+            iv,
+            cipherBytes, cipherBytes.count,
+            &plaintext, plaintext.count,
+            &plaintextLen
+        )
+        guard decryptResult == kCCSuccess else { return nil }
+
+        // 5. JSON 파싱 후 첫 번째 유효 토큰 반환
+        let plaintextData = Data(plaintext.prefix(plaintextLen))
+        guard let tokenCache = try? JSONSerialization.jsonObject(with: plaintextData) as? [String: Any]
+        else { return nil }
+
+        for (_, value) in tokenCache {
+            if let entry = value as? [String: Any],
+               let token = entry["token"] as? String,
+               token.hasPrefix("sk-ant-") {
+                return token
+            }
+        }
+        return nil
     }
 
     // MARK: - Context Info

@@ -92,6 +92,7 @@ enum StatusBarItem: String, CaseIterable, Codable, Identifiable {
     case cost             // 5h 비용
     case weeklyCost       // 1w 비용
     case context          // 컨텍스트 사용률
+    case extraUsage       // 추가 사용량
 
     var id: String { rawValue }
 
@@ -111,6 +112,8 @@ enum StatusBarItem: String, CaseIterable, Codable, Identifiable {
         case (.weeklyCost, .english): "1w Cost"
         case (.context, .korean): "컨텍스트"
         case (.context, .english): "Context"
+        case (.extraUsage, .korean): "추가 사용량"
+        case (.extraUsage, .english): "Extra Usage"
         }
     }
 }
@@ -234,6 +237,10 @@ final class AppSettings {
         didSet { save() }
     }
 
+    var showDaysFormat: Bool {
+        didSet { save() }
+    }
+
     private let defaults = UserDefaults.standard
 
     private init() {
@@ -300,6 +307,7 @@ final class AppSettings {
         alertThreshold1 = defaults.object(forKey: "alertThreshold1") as? Double ?? 50
         alertThreshold2 = defaults.object(forKey: "alertThreshold2") as? Double ?? 80
         alertThreshold3 = defaults.object(forKey: "alertThreshold3") as? Double ?? 90
+        showDaysFormat = defaults.object(forKey: "showDaysFormat") as? Bool ?? false
     }
 
     private func save() {
@@ -323,5 +331,6 @@ final class AppSettings {
         defaults.set(alertThreshold1, forKey: "alertThreshold1")
         defaults.set(alertThreshold2, forKey: "alertThreshold2")
         defaults.set(alertThreshold3, forKey: "alertThreshold3")
+        defaults.set(showDaysFormat, forKey: "showDaysFormat")
     }
 }

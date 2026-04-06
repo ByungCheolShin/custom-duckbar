@@ -87,12 +87,12 @@ struct BadgeView: View {
                 .font(.system(size: 32))
                 .opacity(badge.isAchieved ? 1.0 : 0.2)
 
-            Text(badge.name)
+            Text(badge.localizedName)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(badge.isAchieved ? .primary : .tertiary)
                 .lineLimit(1)
 
-            Text(badge.description)
+            Text(badge.localizedDescription)
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

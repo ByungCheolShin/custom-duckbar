@@ -48,6 +48,8 @@ enum L {
     static var cacheHit: String { lang == .korean ? "캐시 적중" : "Cache Hit" }
     static var requests: String { lang == .korean ? "요청" : "reqs" }
     static var weekly: String { lang == .korean ? "주간" : "weekly" }
+    static var monthly: String { lang == .korean ? "월간" : "monthly" }
+    static var extraUsageDisabled: String { lang == .korean ? "추가 사용량 미사용" : "not enabled" }
 
     // Token labels
     static var tokenIn: String { "In" }
@@ -121,6 +123,7 @@ enum L {
     static var automaticUpdateCheck: String { lang == .korean ? "자동 업데이트 확인" : "Check for Updates Automatically" }
     static var automaticUpdateInstall: String { lang == .korean ? "업데이트 자동 설치" : "Automatically Install Updates" }
     static var setHotkey: String { lang == .korean ? "설정" : "Set" }
+    static var showDaysFormat: String { lang == .korean ? "24시간 이상 시 일(d)로 표시" : "Show days when over 24h" }
     static var sizeSmall: String { lang == .korean ? "작게" : "Small" }
     static var sizeMedium: String { lang == .korean ? "보통" : "Medium" }
     static var sizeLarge: String { lang == .korean ? "크게" : "Large" }

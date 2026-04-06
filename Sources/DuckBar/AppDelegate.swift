@@ -426,6 +426,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let pct = Int(stats.contextInfo.usagePercent * 100)
             parts.append("ctx \(pct)%")
         }
+        if items.contains(.extraUsage) {
+            let rl = stats.rateLimits
+            if rl.extraUsageLoaded {
+                if rl.extraUsageEnabled, let used = rl.extraUsageUsed, let limit = rl.extraUsageLimit {
+                    parts.append("ex $\(String(format: "%.2f", used))/$\(String(format: "%.0f", limit))")
+                } else if rl.extraUsageEnabled, let util = rl.extraUsageUtilization {
+                    parts.append("ex \(Int(util))%")
+                } else {
+                    parts.append("ex —")
+                }
+            }
+        }
 
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
