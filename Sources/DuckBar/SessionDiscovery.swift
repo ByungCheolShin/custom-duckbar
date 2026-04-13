@@ -178,6 +178,7 @@ struct SessionDiscovery {
 
         let now = Date()
         let fiveHoursAgo = now.addingTimeInterval(-5 * 3600)
+        let oneDayAgo = now.addingTimeInterval(-24 * 3600)
         let oneWeekAgo = now.addingTimeInterval(-7 * 24 * 3600)
 
         for baseDir in sessionDirs {
@@ -199,16 +200,43 @@ struct SessionDiscovery {
                                modDate < oneWeekAgo { continue }
 
                             guard let content = try? String(contentsOf: file, encoding: .utf8) else { continue }
-                            parseCodexJSONL(content, fiveHoursAgo: fiveHoursAgo, oneWeekAgo: oneWeekAgo, into: &stats)
+                            parseCodexJSONL(content, fiveHoursAgo: fiveHoursAgo, oneDayAgo: oneDayAgo, oneWeekAgo: oneWeekAgo, into: &stats)
                         }
                     }
                 }
             }
         }
+
+        // 24시간 전체 슬롯을 빈 버킷으로 채움 (라인차트용)
+        let calendar = Calendar.current
+        let hourlyBuckets = Dictionary(uniqueKeysWithValues: stats.codexHourlyData.map { ($0.hour, $0) })
+        let weeklyBuckets = Dictionary(uniqueKeysWithValues: stats.codexWeeklyHourlyData.map { ($0.hour, $0) })
+        let currentHour = calendar.date(from: calendar.dateComponents([.year, .month, .day, .hour], from: now))!
+
+        let dayStartHour = calendar.date(from: calendar.dateComponents([.year, .month, .day, .hour], from: oneDayAgo))!
+        var allHours: [HourlyTokenData] = []
+        var h = dayStartHour
+        while h <= currentHour {
+            allHours.append(hourlyBuckets[h] ?? HourlyTokenData(id: h))
+            h = calendar.date(byAdding: .hour, value: 1, to: h)!
+        }
+        stats.codexHourlyData = allHours
+
+        let weekStartHour = calendar.date(from: calendar.dateComponents([.year, .month, .day, .hour], from: oneWeekAgo))!
+        var allWeeklyHours: [HourlyTokenData] = []
+        var wh = weekStartHour
+        while wh <= currentHour {
+            allWeeklyHours.append(weeklyBuckets[wh] ?? HourlyTokenData(id: wh))
+            wh = calendar.date(byAdding: .hour, value: 1, to: wh)!
+        }
+        stats.codexWeeklyHourlyData = allWeeklyHours
     }
 
-    private func parseCodexJSONL(_ content: String, fiveHoursAgo: Date, oneWeekAgo: Date, into stats: inout UsageStats) {
+    private func parseCodexJSONL(_ content: String, fiveHoursAgo: Date, oneDayAgo: Date, oneWeekAgo: Date, into stats: inout UsageStats) {
         var prevSnapshot: (Int, Int, Int, Int)? = nil  // 중복 스냅샷 방지
+        var hourlyAccum: [Date: Int] = [:]
+        var weeklyAccum: [Date: Int] = [:]
+        var latestRateLimitTimestamp: Date? = nil
 
         for line in content.components(separatedBy: .newlines) {
             guard !line.isEmpty,
@@ -218,9 +246,31 @@ struct SessionDiscovery {
 
             guard obj["type"] as? String == "event_msg",
                   let payload = obj["payload"] as? [String: Any],
-                  payload["type"] as? String == "token_count",
-                  let info = payload["info"] as? [String: Any]
+                  payload["type"] as? String == "token_count"
             else { continue }
+
+            // rate_limits 파싱 (가장 최신 타임스탬프 기준)
+            if let rl = payload["rate_limits"] as? [String: Any],
+               let primary = rl["primary"] as? [String: Any],
+               let timestampStr = obj["timestamp"] as? String,
+               let timestamp = parseISO8601(timestampStr) {
+                if latestRateLimitTimestamp == nil || timestamp > latestRateLimitTimestamp! {
+                    latestRateLimitTimestamp = timestamp
+                    var codexRL = CodexRateLimits()
+                    codexRL.usedPercent = primary["used_percent"] as? Double ?? 0
+                    codexRL.windowMinutes = primary["window_minutes"] as? Int ?? 10080
+                    if let resetsAtEpoch = primary["resets_at"] as? Double {
+                        codexRL.resetsAt = Date(timeIntervalSince1970: resetsAtEpoch)
+                    } else if let resetsAtEpoch = primary["resets_at"] as? Int {
+                        codexRL.resetsAt = Date(timeIntervalSince1970: Double(resetsAtEpoch))
+                    }
+                    codexRL.planType = rl["plan_type"] as? String ?? ""
+                    codexRL.isLoaded = true
+                    stats.codexRateLimits = codexRL
+                }
+            }
+
+            guard let info = payload["info"] as? [String: Any] else { continue }
 
             // last_token_usage 우선, 없으면 total_token_usage
             let usageDict = info["last_token_usage"] as? [String: Any]
@@ -241,17 +291,46 @@ struct SessionDiscovery {
                   let timestamp = parseISO8601(timestampStr)
             else { continue }
 
+            let tokens = input + output + cached
+
             if timestamp >= fiveHoursAgo {
                 stats.codexFiveHourTokens.inputTokens += input
                 stats.codexFiveHourTokens.outputTokens += output
                 stats.codexFiveHourTokens.cachedInputTokens += cached
                 stats.codexFiveHourTokens.requestCount += 1
             }
+            if timestamp >= oneDayAgo {
+                let hourKey = Calendar.current.dateInterval(of: .hour, for: timestamp)!.start
+                hourlyAccum[hourKey, default: 0] += tokens
+            }
             if timestamp >= oneWeekAgo {
                 stats.codexOneWeekTokens.inputTokens += input
                 stats.codexOneWeekTokens.outputTokens += output
                 stats.codexOneWeekTokens.cachedInputTokens += cached
                 stats.codexOneWeekTokens.requestCount += 1
+
+                let hourKey = Calendar.current.dateInterval(of: .hour, for: timestamp)!.start
+                weeklyAccum[hourKey, default: 0] += tokens
+            }
+        }
+
+        // hourlyData 병합 (기존 항목 누적)
+        for (hour, val) in hourlyAccum {
+            if let idx = stats.codexHourlyData.firstIndex(where: { $0.hour == hour }) {
+                stats.codexHourlyData[idx].inputTokens += val
+            } else {
+                var entry = HourlyTokenData(id: hour)
+                entry.inputTokens = val
+                stats.codexHourlyData.append(entry)
+            }
+        }
+        for (hour, val) in weeklyAccum {
+            if let idx = stats.codexWeeklyHourlyData.firstIndex(where: { $0.hour == hour }) {
+                stats.codexWeeklyHourlyData[idx].inputTokens += val
+            } else {
+                var entry = HourlyTokenData(id: hour)
+                entry.inputTokens = val
+                stats.codexWeeklyHourlyData.append(entry)
             }
         }
     }

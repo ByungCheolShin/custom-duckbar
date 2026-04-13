@@ -17,12 +17,14 @@ struct ShareCardView: View {
             rateLimitSection
             Divider().background(Color.white.opacity(0.15))
             tokenSection
-            if !stats.modelUsages.isEmpty {
+            if !stats.modelUsages.isEmpty && provider != .codex {
                 Divider().background(Color.white.opacity(0.15))
                 modelSection
             }
-            Divider().background(Color.white.opacity(0.15))
-            contextSection
+            if provider != .codex {
+                Divider().background(Color.white.opacity(0.15))
+                contextSection
+            }
             Divider().background(Color.white.opacity(0.15))
             if chartTab == "line" {
                 lineChartSection
@@ -74,13 +76,23 @@ struct ShareCardView: View {
     }
 
     private var statusBadge: some View {
-        let rl = stats.rateLimits
-        let pct = rl.isLoaded ? rl.fiveHourPercent : 0
+        let (pct, label): (Double, String) = {
+            switch provider {
+            case .codex:
+                let rl = stats.codexRateLimits
+                let p = rl.isLoaded ? rl.usedPercent : 0
+                return (p, rl.isLoaded ? "\(Int(p))%" : "—")
+            default:
+                let rl = stats.rateLimits
+                let p = rl.isLoaded ? rl.fiveHourPercent : 0
+                return (p, rl.isLoaded ? "\(Int(p))%" : "—")
+            }
+        }()
         let color: Color = pct >= 80 ? .red : pct >= 50 ? .orange : .green
-        let label = rl.isLoaded ? "\(Int(pct))%" : "—"
+        let prefix = provider == .codex ? "1w" : "5h"
         return HStack(spacing: 4) {
             Circle().fill(color).frame(width: 6, height: 6)
-            Text("5h \(label)")
+            Text("\(prefix) \(label)")
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundStyle(color)
         }
@@ -93,27 +105,53 @@ struct ShareCardView: View {
     // MARK: - Rate Limits
 
     private var rateLimitSection: some View {
-        let rl = stats.rateLimits
-        return VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("RATE LIMITS")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .tracking(1.2)
 
-            cardProgressRow(
-                label: "5h",
-                value: rl.isLoaded ? rl.fiveHourPercent / 100 : 0,
-                text: rl.isLoaded ? "\(Int(rl.fiveHourPercent))%" : "—",
-                sub: rl.isLoaded ? "↻ \(rl.fiveHourResetString)" : "",
-                color: progressColor(rl.fiveHourPercent)
-            )
-            cardProgressRow(
-                label: "1w",
-                value: rl.isLoaded ? rl.weeklyPercent / 100 : 0,
-                text: rl.isLoaded ? "\(Int(rl.weeklyPercent))%" : "—",
-                sub: rl.isLoaded ? "↻ \(rl.weeklyResetString)" : "",
-                color: progressColor(rl.weeklyPercent)
-            )
+            switch provider {
+            case .codex:
+                let crl = stats.codexRateLimits
+                cardProgressRow(
+                    label: "1w",
+                    value: crl.isLoaded ? crl.usedPercent / 100 : 0,
+                    text: crl.isLoaded ? "\(Int(crl.usedPercent))%" : "—",
+                    sub: crl.isLoaded ? "↻ \(crl.resetString)" : "",
+                    color: progressColor(crl.usedPercent)
+                )
+            case .both:
+                let rl = stats.rateLimits
+                let crl = stats.codexRateLimits
+                cardProgressRow(label: "C 5h",
+                    value: rl.isLoaded ? rl.fiveHourPercent / 100 : 0,
+                    text: rl.isLoaded ? "\(Int(rl.fiveHourPercent))%" : "—",
+                    sub: rl.isLoaded ? "↻ \(rl.fiveHourResetString)" : "",
+                    color: progressColor(rl.fiveHourPercent))
+                cardProgressRow(label: "C 1w",
+                    value: rl.isLoaded ? rl.weeklyPercent / 100 : 0,
+                    text: rl.isLoaded ? "\(Int(rl.weeklyPercent))%" : "—",
+                    sub: rl.isLoaded ? "↻ \(rl.weeklyResetString)" : "",
+                    color: progressColor(rl.weeklyPercent))
+                cardProgressRow(label: "X 1w",
+                    value: crl.isLoaded ? crl.usedPercent / 100 : 0,
+                    text: crl.isLoaded ? "\(Int(crl.usedPercent))%" : "—",
+                    sub: crl.isLoaded ? "↻ \(crl.resetString)" : "",
+                    color: progressColor(crl.usedPercent))
+            default:
+                let rl = stats.rateLimits
+                cardProgressRow(label: "5h",
+                    value: rl.isLoaded ? rl.fiveHourPercent / 100 : 0,
+                    text: rl.isLoaded ? "\(Int(rl.fiveHourPercent))%" : "—",
+                    sub: rl.isLoaded ? "↻ \(rl.fiveHourResetString)" : "",
+                    color: progressColor(rl.fiveHourPercent))
+                cardProgressRow(label: "1w",
+                    value: rl.isLoaded ? rl.weeklyPercent / 100 : 0,
+                    text: rl.isLoaded ? "\(Int(rl.weeklyPercent))%" : "—",
+                    sub: rl.isLoaded ? "↻ \(rl.weeklyResetString)" : "",
+                    color: progressColor(rl.weeklyPercent))
+            }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
@@ -284,13 +322,14 @@ struct ShareCardView: View {
     // MARK: - Line Chart
 
     private var lineChartSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let hourlyData = provider == .codex ? stats.codexHourlyData : stats.hourlyData
+        return VStack(alignment: .leading, spacing: 8) {
             Text("TOKENS (24h)")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .tracking(1.2)
 
-            Chart(stats.hourlyData) { point in
+            Chart(hourlyData) { point in
                 LineMark(x: .value("시간", point.hour), y: .value("토큰", point.totalTokens))
                     .foregroundStyle(.blue)
                     .interpolationMethod(.catmullRom)
@@ -316,13 +355,14 @@ struct ShareCardView: View {
     // MARK: - Heatmap
 
     private var heatmapSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let weeklyData = provider == .codex ? stats.codexWeeklyHourlyData : stats.weeklyHourlyData
+        return VStack(alignment: .leading, spacing: 8) {
             Text("ACTIVITY (7d)")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .tracking(1.2)
 
-            HeatmapView(weeklyData: stats.weeklyHourlyData, fontScale: 0.85, showDayLabels: false)
+            HeatmapView(weeklyData: weeklyData, fontScale: 0.85, showDayLabels: false)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 18)

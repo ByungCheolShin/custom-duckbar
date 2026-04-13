@@ -386,47 +386,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let stats = monitor.usageStats
 
         // 순서 고정
-        if items.contains(.rateLimit) {
+        if items.contains(.rateLimit) && settings.activeProvider != .codex {
             let text = stats.rateLimits.isLoaded ? "5h \(Int(stats.rateLimits.fiveHourPercent))%" : "5h —"
             parts.append(text)
         }
         if items.contains(.weeklyRateLimit) {
-            let text = stats.rateLimits.isLoaded ? "1w \(Int(stats.rateLimits.weeklyPercent))%" : "1w —"
-            parts.append(text)
+            switch settings.activeProvider {
+            case .claude:
+                let text = stats.rateLimits.isLoaded ? "1w \(Int(stats.rateLimits.weeklyPercent))%" : "1w —"
+                parts.append(text)
+            case .codex:
+                let text = stats.codexRateLimits.isLoaded ? "1w \(Int(stats.codexRateLimits.usedPercent))%" : "1w —"
+                parts.append(text)
+            case .both:
+                let claudeText = stats.rateLimits.isLoaded ? "\(Int(stats.rateLimits.weeklyPercent))%" : "—"
+                let codexText = stats.codexRateLimits.isLoaded ? "\(Int(stats.codexRateLimits.usedPercent))%" : "—"
+                parts.append("1w \(claudeText)/\(codexText)")
+            }
         }
         if items.contains(.tokens) {
             switch settings.activeProvider {
             case .claude: parts.append(TokenUsage.formatTokens(stats.fiveHourTokens.totalTokens))
             case .codex:  parts.append(TokenUsage.formatTokens(stats.codexFiveHourTokens.totalTokens))
-            case .both:   parts.append(TokenUsage.formatTokens(stats.fiveHourTokens.totalTokens + stats.codexFiveHourTokens.totalTokens))
+            case .both:   parts.append("\(TokenUsage.formatTokens(stats.fiveHourTokens.totalTokens))/\(TokenUsage.formatTokens(stats.codexFiveHourTokens.totalTokens))")
             }
         }
         if items.contains(.weeklyTokens) {
             switch settings.activeProvider {
             case .claude: parts.append(TokenUsage.formatTokens(stats.oneWeekTokens.totalTokens))
             case .codex:  parts.append(TokenUsage.formatTokens(stats.codexOneWeekTokens.totalTokens))
-            case .both:   parts.append(TokenUsage.formatTokens(stats.oneWeekTokens.totalTokens + stats.codexOneWeekTokens.totalTokens))
+            case .both:   parts.append("\(TokenUsage.formatTokens(stats.oneWeekTokens.totalTokens))/\(TokenUsage.formatTokens(stats.codexOneWeekTokens.totalTokens))")
             }
         }
         if items.contains(.cost) {
             switch settings.activeProvider {
             case .claude: parts.append(TokenUsage.formatCost(stats.fiveHourTokens.estimatedCostUSD))
             case .codex:  parts.append(TokenUsage.formatCost(stats.codexFiveHourTokens.estimatedCostUSD))
-            case .both:   parts.append(TokenUsage.formatCost(stats.fiveHourTokens.estimatedCostUSD + stats.codexFiveHourTokens.estimatedCostUSD))
+            case .both:   parts.append("\(TokenUsage.formatCost(stats.fiveHourTokens.estimatedCostUSD))/\(TokenUsage.formatCost(stats.codexFiveHourTokens.estimatedCostUSD))")
             }
         }
         if items.contains(.weeklyCost) {
             switch settings.activeProvider {
             case .claude: parts.append(TokenUsage.formatCost(stats.oneWeekTokens.estimatedCostUSD))
             case .codex:  parts.append(TokenUsage.formatCost(stats.codexOneWeekTokens.estimatedCostUSD))
-            case .both:   parts.append(TokenUsage.formatCost(stats.oneWeekTokens.estimatedCostUSD + stats.codexOneWeekTokens.estimatedCostUSD))
+            case .both:   parts.append("\(TokenUsage.formatCost(stats.oneWeekTokens.estimatedCostUSD))/\(TokenUsage.formatCost(stats.codexOneWeekTokens.estimatedCostUSD))")
             }
         }
-        if items.contains(.context) {
+        if items.contains(.context) && settings.activeProvider != .codex {
             let pct = Int(stats.contextInfo.usagePercent * 100)
             parts.append("ctx \(pct)%")
         }
-        if items.contains(.extraUsage) {
+        if items.contains(.extraUsage) && settings.activeProvider != .codex {
             let rl = stats.rateLimits
             if rl.extraUsageLoaded {
                 if rl.extraUsageEnabled, let used = rl.extraUsageUsed, let limit = rl.extraUsageLimit {

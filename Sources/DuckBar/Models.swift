@@ -279,6 +279,28 @@ struct HourlyTokenData: Identifiable, Equatable {
     }
 }
 
+// MARK: - Codex Rate Limits
+
+struct CodexRateLimits: Equatable {
+    var usedPercent: Double = 0       // 0.0 ~ 100.0
+    var windowMinutes: Int = 10080    // 기본 1주일
+    var resetsAt: Date? = nil
+    var planType: String = ""
+    var isLoaded: Bool = false
+
+    var resetString: String {
+        guard let resetsAt else { return "—" }
+        let diff = resetsAt.timeIntervalSinceNow
+        guard diff > 0 else { return "—" }
+        let days = Int(diff) / 86400
+        let hours = (Int(diff) % 86400) / 3600
+        let minutes = (Int(diff) % 3600) / 60
+        if days > 0 { return "\(days)d \(hours)h" }
+        if hours > 0 { return "\(hours)h \(minutes)m" }
+        return "\(minutes)m"
+    }
+}
+
 // MARK: - Codex Token Usage (세션 합산)
 
 struct CodexTokenUsage: Equatable {
@@ -313,6 +335,9 @@ struct UsageStats: Equatable {
     // Codex
     var codexFiveHourTokens = CodexTokenUsage()
     var codexOneWeekTokens = CodexTokenUsage()
+    var codexRateLimits = CodexRateLimits()
+    var codexHourlyData: [HourlyTokenData] = []         // 24시간 (라인차트)
+    var codexWeeklyHourlyData: [HourlyTokenData] = []   // 7일 (히트맵)
 
     // 전체 누적 (마일스톤용)
     var allTimeTokens: Int = 0

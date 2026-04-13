@@ -65,7 +65,9 @@ struct StatusMenuView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if monitor.sessions.isEmpty {
+                    if settings.activeProvider == .codex {
+                        // Codex는 세션 개념 없음
+                    } else if monitor.sessions.isEmpty {
                         emptyStateView
                     } else {
                         sessionListView
@@ -73,7 +75,13 @@ struct StatusMenuView: View {
 
                     if settings.visibleSections.contains(.rateLimits) {
                         Divider()
-                        rateLimitsView
+                        switch settings.activeProvider {
+                        case .claude: rateLimitsView
+                        case .codex:  codexRateLimitsView
+                        case .both:
+                            rateLimitsView
+                            codexRateLimitsView
+                        }
                     }
                     if settings.visibleSections.contains(.fiveHourTokens) {
                         Divider()
@@ -101,13 +109,19 @@ struct StatusMenuView: View {
                     }
                     if settings.visibleSections.contains(.chart) {
                         Divider()
-                        chartToggleView
+                        switch settings.activeProvider {
+                        case .claude: chartToggleView
+                        case .codex:  codexChartToggleView
+                        case .both:
+                            chartToggleView
+                            codexChartToggleView
+                        }
                     }
-                    if settings.visibleSections.contains(.modelUsage) && !monitor.usageStats.modelUsages.isEmpty {
+                    if settings.visibleSections.contains(.modelUsage) && !monitor.usageStats.modelUsages.isEmpty && settings.activeProvider != .codex {
                         Divider()
                         modelUsageView
                     }
-                    if settings.visibleSections.contains(.context) {
+                    if settings.visibleSections.contains(.context) && settings.activeProvider != .codex {
                         Divider()
                         contextView
                     }
@@ -330,6 +344,37 @@ struct StatusMenuView: View {
         .padding(.vertical, 8)
     }
 
+    // MARK: - Codex Rate Limits
+
+    private var codexRateLimitsView: some View {
+        let rl = monitor.usageStats.codexRateLimits
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(L.rateLimits)
+                .font(.system(size: 11 * s, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 6) {
+                Text("1w")
+                    .font(.system(size: 10 * s, weight: .medium))
+                    .frame(width: 20 * s, alignment: .trailing)
+                ProgressBarView(
+                    value: rl.isLoaded ? rl.usedPercent / 100 : 0,
+                    color: rl.isLoaded ? progressColor(rl.usedPercent) : .gray
+                )
+                Text(rl.isLoaded ? "\(Int(rl.usedPercent))%" : L.noData)
+                    .font(.system(size: 10 * s, weight: .medium, design: .monospaced))
+                    .foregroundStyle(rl.isLoaded ? progressColor(rl.usedPercent) : .secondary)
+                    .frame(width: 32 * s, alignment: .trailing)
+                Text("↻ \(rl.resetString)")
+                    .font(.system(size: 9 * s))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 60 * s, alignment: .trailing)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+
     // MARK: - Token Usage
 
     private func tokenUsageView(title: String, tokens: TokenUsage) -> some View {
@@ -444,6 +489,40 @@ struct StatusMenuView: View {
             TokenChartView(
                 hourlyData: monitor.usageStats.hourlyData,
                 weeklyHourlyData: monitor.usageStats.weeklyHourlyData,
+                fontScale: s,
+                defaultTab: settings.defaultChartTab
+            )
+            .frame(height: showChart ? nil : 0, alignment: .top)
+            .clipped()
+        }
+    }
+
+    // MARK: - Codex Chart Toggle
+
+    private var codexChartToggleView: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: { showChart.toggle() }) {
+                HStack {
+                    Image(systemName: "chart.line.uptrend.xyaxis")
+                        .font(.system(size: 10 * s))
+                        .foregroundStyle(.secondary)
+                    Text(L.chart)
+                        .font(.system(size: 11 * s, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Image(systemName: showChart ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 9 * s))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            TokenChartView(
+                hourlyData: monitor.usageStats.codexHourlyData,
+                weeklyHourlyData: monitor.usageStats.codexWeeklyHourlyData,
                 fontScale: s,
                 defaultTab: settings.defaultChartTab
             )
