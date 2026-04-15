@@ -7,10 +7,9 @@ import UserNotifications
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
-    private var popoverManager: PopoverManager!
+    private var mainWindowController: MainWindowController!
     private var monitor: SessionMonitor!
     private let settings = AppSettings.shared
-    private var statusMenuView: StatusMenuView!
     private var updateTimer: Timer?
     private var updaterController: SPUStandardUpdaterController!
     private var lastRenderedState: SessionState?
@@ -46,12 +45,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
-        // 팝오버 설정 (시스템 기본 NSPopover)
-        popoverManager = PopoverManager()
-        statusMenuView = StatusMenuView(monitor: monitor, settings: settings) {
+        // 메인 윈도우 준비 (팝오버 대체)
+        mainWindowController = MainWindowController(monitor: monitor, settings: settings) {
             NSApplication.shared.terminate(nil)
         }
-        popoverManager.setContentView(statusMenuView)
+
+        // 앱 실행 시 창을 자동으로 한 번 표시
+        mainWindowController.show()
 
         // 알림 권한 요청 및 설정 연결
         monitor.alertsEnabled = settings.usageAlertsEnabled
@@ -147,6 +147,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DistributedNotificationCenter.default().removeObserver(self)
     }
 
+    /// Dock 아이콘 클릭 (창이 모두 닫힌 상태에서) → 메인 창 복구
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            mainWindowController?.show()
+        }
+        return true
+    }
+
     @objc private func hotkeyChanged() {
         setupHotkey()
     }
@@ -204,7 +212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hk = HotKey(carbonKeyCode: UInt32(keyCode), carbonModifiers: modifiers.carbonFlags)
         hk.keyDownHandler = { [weak self] in
             Task { @MainActor in
-                self?.togglePopover()
+                self?.toggleMainWindow()
             }
         }
         hotKey = hk
@@ -215,13 +223,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if event.type == .rightMouseUp {
             showContextMenu()
         } else {
-            togglePopover()
+            toggleMainWindow()
         }
     }
 
     private func showContextMenu() {
         guard let button = statusItem.button else { return }
         let menu = NSMenu()
+
+        let openWindowItem = NSMenuItem(title: L.openMainWindow, action: #selector(openMainWindowAction), keyEquivalent: "o")
+        openWindowItem.target = self
+        menu.addItem(openWindowItem)
+
+        menu.addItem(NSMenuItem.separator())
 
         let refreshItem = NSMenuItem(title: L.refresh, action: #selector(refreshAction), keyEquivalent: "r")
         refreshItem.target = self
@@ -258,6 +272,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 5), in: button)
     }
 
+    @objc private func openMainWindowAction() {
+        mainWindowController.show()
+        Task {
+            await monitor.refreshAsync()
+            checkMilestones(stats: monitor.usageStats)
+        }
+    }
+
     @objc private func showShareCardPreview() {
         shareCardWindowController = ShareCardWindowController(stats: monitor.usageStats, chartTab: settings.defaultChartTab, provider: settings.activeProvider)
         shareCardWindowController?.show()
@@ -271,16 +293,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettingsAction() {
-        let wasShown = popoverManager.isShown
-        if !wasShown { togglePopover() }
+        let wasShown = mainWindowController.isVisible
+        if !wasShown { mainWindowController.show() }
         DispatchQueue.main.asyncAfter(deadline: .now() + (wasShown ? 0 : 0.15)) {
             NotificationCenter.default.post(name: .openSettings, object: nil)
         }
     }
 
     @objc private func openHelpAction() {
-        let wasShown = popoverManager.isShown
-        if !wasShown { togglePopover() }
+        let wasShown = mainWindowController.isVisible
+        if !wasShown { mainWindowController.show() }
         DispatchQueue.main.asyncAfter(deadline: .now() + (wasShown ? 0 : 0.15)) {
             NotificationCenter.default.post(name: .openHelp, object: nil)
         }
@@ -295,24 +317,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.terminate(nil)
     }
 
-    private func togglePopover() {
-        guard let button = statusItem.button else { return }
-        let size = NSSize(
-            width: settings.popoverSize.width,
-            height: settings.popoverSize.height
-        )
-        popoverManager.toggle(relativeTo: button, withSize: size)
+    private func toggleMainWindow() {
+        mainWindowController.toggle()
 
-        if popoverManager.isShown {
+        if mainWindowController.isVisible {
             Task {
                 await monitor.refreshAsync()
                 checkMilestones(stats: monitor.usageStats)
             }
         }
-    }
-
-    private func closePopover() {
-        popoverManager.close()
     }
 
     private func updateMenuBarIcon() {

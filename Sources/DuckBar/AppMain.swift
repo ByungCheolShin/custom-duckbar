@@ -25,7 +25,7 @@ struct Main {
         let delegate = AppDelegate()
         let app = NSApplication.shared
         app.delegate = delegate
-        app.setActivationPolicy(.accessory) // 메뉴바 전용, Dock에 표시 안 함
+        app.setActivationPolicy(.regular) // 창 + 메뉴바 하이브리드, Dock 표시
         app.run()
     }
 }

@@ -70,6 +70,7 @@ enum L {
     // Context menu
     static var about: String { lang == .korean ? "앱 정보" : "About" }
     static var help: String { lang == .korean ? "도움말" : "Help" }
+    static var openMainWindow: String { lang == .korean ? "창 열기" : "Open Window" }
 
     // Settings view
     static var language: String { lang == .korean ? "언어" : "Language" }

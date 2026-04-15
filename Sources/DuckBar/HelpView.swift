@@ -96,7 +96,7 @@ struct HelpView: View {
                     ])
                     Divider()
                     helpSection(title: "Controls", items: [
-                        ("Left click", "Open/close status popover"),
+                        ("Left click", "Show/hide main window"),
                         ("Right click", "Quick menu (refresh/settings/quit)"),
                         ("ctx", "Context window usage (%)"),
                     ])

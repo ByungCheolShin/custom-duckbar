@@ -241,6 +241,11 @@ final class AppSettings {
         didSet { save() }
     }
 
+    /// 메인 윈도우의 마지막 프레임 ("{{x, y}, {w, h}}" 문자열). nil이면 기본 중앙 배치.
+    var mainWindowFrame: String? {
+        didSet { save() }
+    }
+
     private let defaults = UserDefaults.standard
 
     private init() {
@@ -308,6 +313,7 @@ final class AppSettings {
         alertThreshold2 = defaults.object(forKey: "alertThreshold2") as? Double ?? 80
         alertThreshold3 = defaults.object(forKey: "alertThreshold3") as? Double ?? 90
         showDaysFormat = defaults.object(forKey: "showDaysFormat") as? Bool ?? false
+        mainWindowFrame = defaults.string(forKey: "mainWindowFrame")
     }
 
     private func save() {
@@ -332,5 +338,10 @@ final class AppSettings {
         defaults.set(alertThreshold2, forKey: "alertThreshold2")
         defaults.set(alertThreshold3, forKey: "alertThreshold3")
         defaults.set(showDaysFormat, forKey: "showDaysFormat")
+        if let frame = mainWindowFrame {
+            defaults.set(frame, forKey: "mainWindowFrame")
+        } else {
+            defaults.removeObject(forKey: "mainWindowFrame")
+        }
     }
 }
