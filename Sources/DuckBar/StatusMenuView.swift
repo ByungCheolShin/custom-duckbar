@@ -145,7 +145,7 @@ struct StatusMenuView: View {
             }
             if showChart {
                 lineChartViewForAccount(stats: stats, fiveH: fiveH, weekly: weekly)
-                heatmapChartViewForAccount(stats: stats, fiveH: fiveH)
+                heatmapChartViewForAccount(stats: stats, weekly: weekly)
             }
         }
 
@@ -186,10 +186,9 @@ struct StatusMenuView: View {
         VStack(alignment: .leading, spacing: 0) {
             chartSectionHeader(L.chartTabLine)
             RateLimitChartView(
-                hourlyData: stats.hourlyData,
-                weeklyHourlyData: stats.weeklyHourlyData,
-                fiveHourPercent: fiveH,
-                weeklyPercent: weekly,
+                history: stats.usageHistory,
+                currentFiveH: fiveH,
+                currentWeekly: weekly,
                 fontScale: s
             )
             .padding(.horizontal, 14)
@@ -197,13 +196,12 @@ struct StatusMenuView: View {
         }
     }
 
-    private func heatmapChartViewForAccount(stats: UsageStats, fiveH: Double?) -> some View {
+    private func heatmapChartViewForAccount(stats: UsageStats, weekly: Double?) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             chartSectionHeader(L.chartTabHeatmap)
             RateLimitHeatmapView(
-                weeklyHourlyData: stats.weeklyHourlyData,
-                currentPercent: fiveH,
-                rollingHours: 5,
+                history: stats.usageHistory,
+                useFiveH: true,
                 fontScale: s,
                 tint: .blue
             )
@@ -316,10 +314,9 @@ struct StatusMenuView: View {
         VStack(alignment: .leading, spacing: 0) {
             chartSectionHeader(L.chartTabLine)
             RateLimitChartView(
-                hourlyData: stats.codexHourlyData,
-                weeklyHourlyData: stats.codexWeeklyHourlyData,
-                fiveHourPercent: nil,
-                weeklyPercent: stats.codexRateLimits.isLoaded ? stats.codexRateLimits.usedPercent : nil,
+                history: stats.usageHistory,
+                currentFiveH: nil,
+                currentWeekly: stats.codexRateLimits.isLoaded ? stats.codexRateLimits.usedPercent : nil,
                 fontScale: s
             )
             .padding(.horizontal, 14)
@@ -331,9 +328,8 @@ struct StatusMenuView: View {
         VStack(alignment: .leading, spacing: 0) {
             chartSectionHeader(L.chartTabHeatmap)
             RateLimitHeatmapView(
-                weeklyHourlyData: stats.codexWeeklyHourlyData,
-                currentPercent: stats.codexRateLimits.isLoaded ? stats.codexRateLimits.usedPercent : nil,
-                rollingHours: 168,
+                history: stats.usageHistory,
+                useFiveH: false,   // Codex는 1w만
                 fontScale: s,
                 tint: .orange
             )

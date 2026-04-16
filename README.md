@@ -14,8 +14,8 @@
 - **멀티 Claude 환경 지원**: `~/.claude-*` 폴더를 자동 발견하여 여러 Claude Code 환경을 동시 모니터링
 - **멀티 Codex 환경 지원**: `~/.codex-*` 폴더를 자동 발견, `auth.json`에서 계정 자동 식별 (이메일 자동 라벨)
 - **수동 계정 그룹핑**: Claude 환경을 설정에서 같은 계정으로 그룹핑 (그룹 번호 지정 방식). 같은 그룹의 환경은 토큰 합산 + 대표 토큰으로 rate limit 조회
-- **Rate Limit 시계열 차트**: 5시간/1주 사용률을 시간축 라인 차트로 시각화 (선형 예측 포함)
-- **Rate Limit 히트맵**: 7일 x 24시간 사용률 패턴을 히트맵으로 표시
+- **Rate Limit 시계열 차트 (실측 기반)**: 주기적으로 `/api/oauth/usage` 응답을 `~/Library/Application Support/DuckBar/usage-history.jsonl`에 누적 저장. 24시간 라인 + 선형 예측 점선
+- **Rate Limit 히트맵**: 7일 x 24시간 실제 사용률 % 패턴 (토큰 추정이 아닌 API 응답 기반)
 - **계정별 대시보드 카드**: Claude/Codex 모두 계정별 고정 크기 카드 (사용한도 + 라인차트 + 히트맵), 가로 스크롤로 탐색. 각 카드에 개별 새로고침 버튼
 
 ### 변경된 기능
@@ -74,6 +74,14 @@ open /Applications/DuckBar.app
 | 자동 업데이트 | 업데이트 확인 및 자동 설치 |
 | 핫키 | 글로벌 단축키로 창 토글 |
 | 갱신 주기 | 데이터 폴링 간격 (1초 ~ 5분) |
+
+## 사용 히스토리 저장소
+
+- **저장 위치**: `~/Library/Application Support/DuckBar/usage-history.jsonl`
+- **형식**: 한 줄 = `{timestamp, provider, account, fiveH, weekly}` (JSON)
+- **보존**: 7일 (앱 시작 시 자동 정리)
+- **수집 주기**: 갱신 주기 설정 값 기준 (기본 5분)
+- 앱을 계속 실행할수록 차트/히트맵 정확도 향상. 오래 쓸수록 좋음
 
 ## 라이선스
 

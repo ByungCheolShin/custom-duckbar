@@ -139,7 +139,10 @@ struct HeatmapView: View {
     private var days: [Date] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
-        return (0..<7).reversed().map { cal.date(byAdding: .day, value: -$0, to: today)! }
+        let weekday = cal.component(.weekday, from: today)
+        let daysFromMonday = (weekday + 5) % 7
+        let monday = cal.date(byAdding: .day, value: -daysFromMonday, to: today)!
+        return (0..<7).map { cal.date(byAdding: .day, value: $0, to: monday)! }
     }
     private var gridHeight: CGFloat {
         // 7*14=98, 6*2=12, +14+20=34 → total 144

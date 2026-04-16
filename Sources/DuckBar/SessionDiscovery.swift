@@ -617,9 +617,11 @@ struct SessionDiscovery {
                         hourlyBuckets[hourStart] = bucket
                     }
 
-                    // 7일 시간별 버킷 (히트맵용)
+                    // 7일 시간별 버킷 (히트맵용) — 로컬 시간대 기준 버킷팅
                     if timestamp >= oneWeekAgo {
-                        let hourStart = calendar.date(from: calendar.dateComponents([.year, .month, .day, .hour], from: timestamp))!
+                        var localCal = calendar
+                        localCal.timeZone = TimeZone.current
+                        let hourStart = localCal.date(from: localCal.dateComponents([.year, .month, .day, .hour], from: timestamp))!
                         var bucket = weeklyHourlyBuckets[hourStart] ?? HourlyTokenData(id: hourStart)
                         bucket.inputTokens += input
                         bucket.outputTokens += output

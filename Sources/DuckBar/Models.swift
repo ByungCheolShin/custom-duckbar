@@ -71,6 +71,18 @@ struct CodexAccountInfo: Identifiable, Equatable {
     var rateLimits: CodexRateLimits
 }
 
+// MARK: - Usage Snapshot (과거 rate limit % 스냅샷)
+
+/// 특정 시점의 rate limit 사용률 스냅샷.
+/// DuckBar가 refresh 시마다 파일에 append하여 누적되는 히스토리 포인트.
+struct UsageSnapshot: Codable, Equatable {
+    let timestamp: Date
+    let provider: String      // "claude" 또는 "codex"
+    let account: String       // accountId 또는 group-key
+    let fiveH: Double?        // 5시간 rolling % (Claude만)
+    let weekly: Double?       // 1주 rolling %
+}
+
 // MARK: - Menu Bar Environment Mode
 
 enum MenuBarEnvMode: String, CaseIterable, Codable {
@@ -416,6 +428,9 @@ struct UsageStats: Equatable {
     // 전체 누적 (마일스톤용)
     var allTimeTokens: Int = 0
     var allTimeCostUSD: Double = 0
+
+    // Rate Limit 시계열 히스토리 (DuckBar가 자체 수집, 최근 24시간 + 예측)
+    var usageHistory: [UsageSnapshot] = []
 }
 
 // MARK: - Notification History

@@ -1,74 +1,43 @@
 import SwiftUI
 import Charts
 
-/// 시간별 Rate Limit 사용률 라인 차트.
-/// - 5시간 롤링 %: 파란색 (fiveHourPercent 전달 시에만)
-/// - 1주 롤링 %: 주황색 (weeklyPercent 전달 시에만)
+/// 시간별 Rate Limit 사용률 라인 차트 (history 기반).
+/// - 5시간 % (파랑) + 1주 % (주황) 실선
+/// - 예측: 최근 30분 기울기로 선형 외삽 (점선)
 /// - 80%, 100% 수평 임계선, "지금" 세로선
-/// - 미래 예측: 최근 1시간 기울기로 선형 외삽 (점선)
-///
-/// 한도 추정: 현재 % / 현재 rolling 토큰합 = 토큰당 %
 struct RateLimitChartView: View {
-    let hourlyData: [HourlyTokenData]           // 24시간 (5h 롤링용)
-    let weeklyHourlyData: [HourlyTokenData]     // 7일 (1w 롤링용)
-    let fiveHourPercent: Double?
-    let weeklyPercent: Double?
+    let history: [UsageSnapshot]
+    let currentFiveH: Double?
+    let currentWeekly: Double?
     let fontScale: CGFloat
 
     private var s: CGFloat { fontScale }
 
-    private struct UsagePoint: Identifiable {
+    private struct PlotPoint: Identifiable {
         let id = UUID()
         let time: Date
-        let fiveHourPct: Double?
-        let weeklyPct: Double?
-        let isPrediction: Bool
+        let value: Double
+        let series: String  // "5h-past" | "5h-future" | "1w-past" | "1w-future"
     }
 
     var body: some View {
-        let points = buildPoints()
         let now = Date()
+        let plotPoints = buildPlotPoints(now: now)
 
         Chart {
-            if fiveHourPercent != nil {
-                ForEach(points.filter { !$0.isPrediction && $0.fiveHourPct != nil }) { p in
-                    LineMark(
-                        x: .value("시간", p.time),
-                        y: .value("5h", p.fiveHourPct ?? 0),
-                        series: .value("series", "5h-past")
-                    )
-                    .foregroundStyle(.blue)
-                    .interpolationMethod(.catmullRom)
-                }
-                ForEach(points.filter { $0.isPrediction && $0.fiveHourPct != nil }) { p in
-                    LineMark(
-                        x: .value("시간", p.time),
-                        y: .value("5h", p.fiveHourPct ?? 0),
-                        series: .value("series", "5h-future")
-                    )
-                    .foregroundStyle(.blue)
-                    .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
-                }
-            }
-            if weeklyPercent != nil {
-                ForEach(points.filter { !$0.isPrediction && $0.weeklyPct != nil }) { p in
-                    LineMark(
-                        x: .value("시간", p.time),
-                        y: .value("1w", p.weeklyPct ?? 0),
-                        series: .value("series", "1w-past")
-                    )
-                    .foregroundStyle(.orange)
-                    .interpolationMethod(.catmullRom)
-                }
-                ForEach(points.filter { $0.isPrediction && $0.weeklyPct != nil }) { p in
-                    LineMark(
-                        x: .value("시간", p.time),
-                        y: .value("1w", p.weeklyPct ?? 0),
-                        series: .value("series", "1w-future")
-                    )
-                    .foregroundStyle(.orange)
-                    .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
-                }
+            ForEach(plotPoints) { p in
+                LineMark(
+                    x: .value("시간", p.time),
+                    y: .value("%", p.value),
+                    series: .value("series", p.series)
+                )
+                .foregroundStyle(colorFor(series: p.series))
+                .lineStyle(
+                    p.series.contains("future")
+                    ? StrokeStyle(lineWidth: 1.5, dash: [3, 3])
+                    : StrokeStyle(lineWidth: 1.8)
+                )
+                .interpolationMethod(.linear)
             }
             RuleMark(y: .value("100%", 100))
                 .foregroundStyle(.red.opacity(0.4))
@@ -81,6 +50,7 @@ struct RateLimitChartView: View {
                 .lineStyle(StrokeStyle(lineWidth: 0.8))
         }
         .chartYScale(domain: 0...105)
+        .chartXScale(domain: now.addingTimeInterval(-24 * 3600)...now.addingTimeInterval(2 * 3600))
         .chartXAxis {
             AxisMarks(values: .stride(by: .hour, count: 6)) { value in
                 AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2]))
@@ -106,77 +76,69 @@ struct RateLimitChartView: View {
         .frame(minHeight: 120 * s)
     }
 
+    private func colorFor(series: String) -> Color {
+        series.hasPrefix("5h") ? .blue : .orange
+    }
+
     // MARK: - 포인트 빌드
 
-    private func buildPoints() -> [UsagePoint] {
-        let now = Date()
-        let calendar = Calendar.current
-        let startHour = calendar.date(from: calendar.dateComponents([.year, .month, .day, .hour], from: now.addingTimeInterval(-24 * 3600)))!
-        let endHour = calendar.date(byAdding: .hour, value: 2, to: calendar.date(from: calendar.dateComponents([.year, .month, .day, .hour], from: now))!)!
+    private func buildPlotPoints(now: Date) -> [PlotPoint] {
+        // 과거 24시간 내 history만 사용
+        let oneDayAgo = now.addingTimeInterval(-24 * 3600)
+        let past = history.filter { $0.timestamp >= oneDayAgo }
 
-        // 한도 추정 (토큰당 %)
-        let currentFiveHourTokens = RateLimitMath.sumTokens(hourlyData, since: now.addingTimeInterval(-5 * 3600))
-        let currentWeeklyTokens = RateLimitMath.sumTokens(weeklyHourlyData, since: now.addingTimeInterval(-7 * 24 * 3600))
+        var points: [PlotPoint] = []
 
-        let fiveHourRatio: Double? = RateLimitMath.ratio(
-            currentPct: fiveHourPercent,
-            currentTokens: currentFiveHourTokens
-        )
-        let weeklyRatio: Double? = RateLimitMath.ratio(
-            currentPct: weeklyPercent,
-            currentTokens: currentWeeklyTokens
-        )
+        // 5시간 % 과거 실선
+        let fiveHPast = past.compactMap { snap -> (Date, Double)? in
+            guard let v = snap.fiveH else { return nil }
+            return (snap.timestamp, v)
+        }
+        for (t, v) in fiveHPast {
+            points.append(PlotPoint(time: t, value: v, series: "5h-past"))
+        }
 
-        // 최근 1시간의 시간당 사용률 증가분 (예측용)
-        let lastHourTokens5h = RateLimitMath.sumTokens(hourlyData, from: now.addingTimeInterval(-3600), to: now)
-        let lastHourTokens1w = RateLimitMath.sumTokens(weeklyHourlyData, from: now.addingTimeInterval(-3600), to: now)
+        // 1주 % 과거 실선
+        let weeklyPast = past.compactMap { snap -> (Date, Double)? in
+            guard let v = snap.weekly else { return nil }
+            return (snap.timestamp, v)
+        }
+        for (t, v) in weeklyPast {
+            points.append(PlotPoint(time: t, value: v, series: "1w-past"))
+        }
 
-        var points: [UsagePoint] = []
-        var cursor = startHour
-        while cursor <= endHour {
-            let isPrediction = cursor > now
+        // 예측: 최근 30분 구간의 기울기(per hour)로 선형 외삽
+        let futureEnd = now.addingTimeInterval(2 * 3600)
 
-            let fivePct: Double?
-            let weeklyPct: Double?
+        if let currentFiveH {
+            let slope = slopePerHour(from: fiveHPast, now: now)
+            // 현재 시점에서 과거 라인과 연결 (같은 series로 만들면 과거-미래가 실선으로 연결되니 별도 series)
+            points.append(PlotPoint(time: now, value: currentFiveH, series: "5h-future"))
+            let predictedEnd = max(0, min(currentFiveH + slope * 2, 110))
+            points.append(PlotPoint(time: futureEnd, value: predictedEnd, series: "5h-future"))
+        }
 
-            if isPrediction {
-                fivePct = RateLimitMath.predict(
-                    cursor: cursor, now: now,
-                    currentPct: fiveHourPercent,
-                    lastHourTokens: lastHourTokens5h,
-                    ratio: fiveHourRatio
-                )
-                weeklyPct = RateLimitMath.predict(
-                    cursor: cursor, now: now,
-                    currentPct: weeklyPercent,
-                    lastHourTokens: lastHourTokens1w,
-                    ratio: weeklyRatio
-                )
-            } else {
-                fivePct = fiveHourRatio.map { ratio in
-                    let tokens = RateLimitMath.sumTokens(hourlyData,
-                                                         from: cursor.addingTimeInterval(-5 * 3600),
-                                                         to: cursor)
-                    return min(Double(tokens) * ratio, 110)
-                }
-                weeklyPct = weeklyRatio.map { ratio in
-                    let tokens = RateLimitMath.sumTokens(weeklyHourlyData,
-                                                         from: cursor.addingTimeInterval(-7 * 24 * 3600),
-                                                         to: cursor)
-                    return min(Double(tokens) * ratio, 110)
-                }
-            }
-
-            points.append(UsagePoint(
-                time: cursor,
-                fiveHourPct: fivePct,
-                weeklyPct: weeklyPct,
-                isPrediction: isPrediction
-            ))
-            cursor = calendar.date(byAdding: .minute, value: 30, to: cursor)!
+        if let currentWeekly {
+            let slope = slopePerHour(from: weeklyPast, now: now)
+            points.append(PlotPoint(time: now, value: currentWeekly, series: "1w-future"))
+            let predictedEnd = max(0, min(currentWeekly + slope * 2, 110))
+            points.append(PlotPoint(time: futureEnd, value: predictedEnd, series: "1w-future"))
         }
 
         return points
+    }
+
+    /// 최근 30분 데이터 기준 시간당 증가율 (%/hour)
+    private func slopePerHour(from points: [(Date, Double)], now: Date) -> Double {
+        let since = now.addingTimeInterval(-30 * 60)
+        let recent = points.filter { $0.0 >= since }
+        guard recent.count >= 2,
+              let first = recent.first,
+              let last = recent.last
+        else { return 0 }
+        let dt = last.0.timeIntervalSince(first.0) / 3600.0  // 시간 단위
+        guard dt > 0 else { return 0 }
+        return (last.1 - first.1) / dt
     }
 
     private func formatHour(_ date: Date) -> String {
@@ -186,28 +148,24 @@ struct RateLimitChartView: View {
     }
 }
 
-// MARK: - Rate Limit 계산 유틸 (공용)
+// MARK: - Rate Limit 계산 유틸 (히트맵용 유지)
 
 enum RateLimitMath {
-    /// [start, end) 구간 토큰 합
     static func sumTokens(_ data: [HourlyTokenData], from start: Date, to end: Date) -> Int {
         data.filter { $0.hour >= start && $0.hour < end }
             .reduce(0) { $0 + $1.totalTokens }
     }
 
-    /// [since, ∞) 토큰 합
     static func sumTokens(_ data: [HourlyTokenData], since: Date) -> Int {
         data.filter { $0.hour >= since }
             .reduce(0) { $0 + $1.totalTokens }
     }
 
-    /// 토큰당 % 비율 (nil이면 계산 불가)
     static func ratio(currentPct: Double?, currentTokens: Int) -> Double? {
         guard let pct = currentPct, pct > 0.5, currentTokens > 0 else { return nil }
         return pct / Double(currentTokens)
     }
 
-    /// 예측 %
     static func predict(cursor: Date, now: Date, currentPct: Double?,
                         lastHourTokens: Int, ratio: Double?) -> Double? {
         guard let ratio, let currentPct else { return nil }
@@ -221,49 +179,66 @@ enum RateLimitMath {
 // MARK: - Rate Limit 기반 히트맵 (7일 × 24시간)
 
 struct RateLimitHeatmapView: View {
-    let weeklyHourlyData: [HourlyTokenData]
-    /// 기준 rate limit % (현재 시점의 rolling %). nil이면 히트맵 안 그림
-    let currentPercent: Double?
-    /// 롤링 윈도우 시간 (5시간 또는 168시간)
-    let rollingHours: Int
+    /// Rate limit % 스냅샷 히스토리 (최근 7일치)
+    let history: [UsageSnapshot]
+    /// 5h % 사용 여부 (true=5h 기준, false=1w 기준)
+    let useFiveH: Bool
     let fontScale: CGFloat
-    /// 색상 톤 (Claude=파랑, Codex=주황 느낌)
     var tint: Color = .blue
     var showDayLabels: Bool = true
 
     private var s: CGFloat { fontScale }
 
+    /// 각 시간 버킷별 최대 % 값을 0~1로 정규화.
+    /// 1시간 안에 여러 스냅샷이 있을 수 있어 max를 취함 (스파이크 보존).
     private var intensityMap: [Date: Double] {
-        guard let currentPercent, currentPercent > 0.5 else { return [:] }
-        // 현재 rolling 토큰합
-        let now = Date()
-        let rollingStart = now.addingTimeInterval(-Double(rollingHours) * 3600)
-        let currentRollingTokens = RateLimitMath.sumTokens(weeklyHourlyData, since: rollingStart)
-        guard currentRollingTokens > 0 else { return [:] }
-        let ratio = currentPercent / Double(currentRollingTokens)
+        var cal = Calendar.current
+        cal.timeZone = TimeZone.current
+        let today = cal.startOfDay(for: Date())
+        let weekday = cal.component(.weekday, from: today)
+        let daysFromMonday = (weekday + 5) % 7
+        let monday = cal.date(byAdding: .day, value: -daysFromMonday, to: today)!
+        let sundayEnd = cal.date(byAdding: .day, value: 7, to: monday)!
+
+        // 이번 주 스냅샷만 필터
+        let thisWeek = history.filter { $0.timestamp >= monday && $0.timestamp < sundayEnd }
+
+        // 시간 버킷별 max % 집계
+        var bucketMax: [Date: Double] = [:]
+        for snap in thisWeek {
+            guard let pct = useFiveH ? snap.fiveH : snap.weekly, pct > 0 else { continue }
+            let hourStart = cal.date(from: cal.dateComponents([.year, .month, .day, .hour], from: snap.timestamp))!
+            bucketMax[hourStart] = max(bucketMax[hourStart] ?? 0, pct)
+        }
+
+        // 0~1 정규화: 100%를 최대로 하지 말고 실제 max 기준
+        // 단, 너무 작은 값들이 안 보이지 않도록 최소 스케일 보장
+        guard let maxPct = bucketMax.values.max(), maxPct > 0 else { return [:] }
+        let scale = max(maxPct, 20.0)  // 최대가 20% 미만이면 20%를 기준으로
 
         var map: [Date: Double] = [:]
-        for bucket in weeklyHourlyData {
-            let cursor = bucket.hour
-            // 이 시점의 [cursor-rollingHours, cursor] 토큰합
-            let start = cursor.addingTimeInterval(-Double(rollingHours) * 3600)
-            let rollingTokens = RateLimitMath.sumTokens(weeklyHourlyData, from: start, to: cursor)
-            let pct = min(Double(rollingTokens) * ratio, 100)
-            map[cursor] = pct / 100.0   // 0~1
+        for (k, v) in bucketMax {
+            map[k] = min(v / scale, 1.0)
         }
         return map
     }
 
     private var days: [Date] {
-        let cal = Calendar.current
+        var cal = Calendar.current
+        cal.timeZone = TimeZone.current
         let today = cal.startOfDay(for: Date())
-        return (0..<7).reversed().map { cal.date(byAdding: .day, value: -$0, to: today)! }
+        let weekday = cal.component(.weekday, from: today)
+        let daysFromMonday = (weekday + 5) % 7
+        let monday = cal.date(byAdding: .day, value: -daysFromMonday, to: today)!
+        return (0..<7).map { cal.date(byAdding: .day, value: $0, to: monday)! }
     }
 
     private var gridHeight: CGFloat { 144 * fontScale }
 
     var body: some View {
-        if currentPercent == nil {
+        // history에 rate limit 스냅샷이 하나라도 있으면 표시
+        let hasData = !history.isEmpty
+        if !hasData {
             VStack {
                 Text("—")
                     .font(.system(size: 10 * s))
@@ -395,7 +370,9 @@ private struct RateLimitHeatmapRow: View {
     }
 
     private func hourDate(_ hour: Int) -> Date {
-        Calendar.current.date(byAdding: .hour, value: hour, to: day)!
+        var cal = Calendar.current
+        cal.timeZone = TimeZone.current
+        return cal.date(byAdding: .hour, value: hour, to: day)!
     }
 
     private func hourLabel(_ hour: Int) -> String {

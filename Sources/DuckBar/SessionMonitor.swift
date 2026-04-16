@@ -52,6 +52,7 @@ final class SessionMonitor {
 
     func start(interval: TimeInterval = 5.0) {
         rebuildEnvironments()
+        UsageHistoryStore.shared.cleanup()
         refreshSync()
         startFileWatchers()
         restartTimers(interval: interval)
@@ -317,6 +318,26 @@ final class SessionMonitor {
             accountStatsMap[cardKey] = stats
         }
 
+        // Claude 계정별 스냅샷 저장 + history 로드 (히트맵용으로 7일치)
+        let claudeHistSince = Date().addingTimeInterval(-7 * 24 * 3600)
+        for info in accountRateLimitList {
+            if info.rateLimits.isLoaded {
+                UsageHistoryStore.shared.append(UsageSnapshot(
+                    timestamp: Date(),
+                    provider: "claude",
+                    account: info.id,
+                    fiveH: info.rateLimits.fiveHourPercent,
+                    weekly: info.rateLimits.weeklyPercent
+                ))
+            }
+            let hist = UsageHistoryStore.shared.load(
+                provider: "claude",
+                account: info.id,
+                since: claudeHistSince
+            )
+            accountStatsMap[info.id]?.usageHistory = hist
+        }
+
         // accountKeys (하위 호환)
         var accountKeyByEnv: [String: String] = [:]
         for env in environments {
@@ -384,6 +405,26 @@ final class SessionMonitor {
                     rateLimits: merged.codexRateLimits
                 ))
                 codexAccountStatsMap[accountId] = merged
+            }
+
+            // Codex 스냅샷 저장 + history 로드 (히트맵용으로 7일치)
+            let codexHistSince = Date().addingTimeInterval(-7 * 24 * 3600)
+            for info in codexAccountInfoList {
+                if info.rateLimits.isLoaded {
+                    UsageHistoryStore.shared.append(UsageSnapshot(
+                        timestamp: Date(),
+                        provider: "codex",
+                        account: info.id,
+                        fiveH: nil,
+                        weekly: info.rateLimits.usedPercent
+                    ))
+                }
+                let hist = UsageHistoryStore.shared.load(
+                    provider: "codex",
+                    account: info.id,
+                    since: codexHistSince
+                )
+                codexAccountStatsMap[info.id]?.usageHistory = hist
             }
         }
 
