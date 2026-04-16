@@ -6,11 +6,6 @@ struct HelpView: View {
 
     private var s: CGFloat { settings.popoverSize.fontScale }
 
-    private var maxScrollHeight: CGFloat {
-        let screenHeight = NSScreen.main?.visibleFrame.height ?? 800
-        return screenHeight - 133
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
@@ -103,7 +98,7 @@ struct HelpView: View {
                 }
             }
             } // ScrollView
-            .frame(maxHeight: maxScrollHeight)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Divider()
 
@@ -130,7 +125,7 @@ struct HelpView: View {
             }
             .padding(.vertical, 10)
         }
-        .frame(width: settings.popoverSize.width)
+        .frame(minWidth: 300, maxWidth: .infinity, minHeight: 300, maxHeight: .infinity)
     }
 
     private func helpSection(title: String, items: [(String, String)]) -> some View {

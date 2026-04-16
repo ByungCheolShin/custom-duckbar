@@ -70,15 +70,11 @@ struct AlertThresholdField: View {
 
 struct SettingsView: View {
     let settings: AppSettings
+    let monitor: SessionMonitor
     var onHelp: (() -> Void)? = nil
     let onDone: () -> Void
     @State private var isRecordingHotkey = false
-
-    /// 헤더(~52pt) + 팝오버 여백을 제외한 스크롤 영역 최대 높이
-    private var maxScrollHeight: CGFloat {
-        let screenHeight = NSScreen.main?.visibleFrame.height ?? 800
-        return screenHeight - 133
-    }
+    @State private var environments: [ClaudeEnvironment] = ClaudeEnvironment.discoverAll()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -142,6 +138,16 @@ struct SettingsView: View {
 
                 Divider()
 
+                // Claude Environments (멀티 홈 디렉토리)
+                environmentsSection
+
+                Divider()
+
+                // Claude Accounts (계정 별칭)
+                accountsSection
+
+                Divider()
+
                 // Language (.id로 언어 변경 시 전체 재렌더링 강제 — L.lang은 SwiftUI observation 밖)
                     VStack(alignment: .leading, spacing: 8) {
                         Label {
@@ -158,31 +164,6 @@ struct SettingsView: View {
                                 SegmentButton(isSelected: settings.language == lang,
                                               title: lang.displayName, fontSize: 12, padding: 6) {
                                     settings.language = lang
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-
-                    Divider()
-
-                    // Popover Size
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label {
-                            Text(L.popoverSize)
-                                .font(.system(size: 11, weight: .semibold))
-                        } icon: {
-                            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                .font(.system(size: 10))
-                        }
-                        .foregroundStyle(.secondary)
-
-                        HStack(spacing: 6) {
-                            ForEach(PopoverSize.allCases, id: \.rawValue) { size in
-                                SegmentButton(isSelected: settings.popoverSize == size,
-                                              title: size.displayName, fontSize: 12, padding: 6) {
-                                    settings.popoverSize = size
                                 }
                             }
                         }
@@ -213,56 +194,6 @@ struct SettingsView: View {
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-
-                    Divider()
-
-                    // 기본 차트 뷰
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label {
-                            Text(L.defaultChartView)
-                                .font(.system(size: 11, weight: .semibold))
-                        } icon: {
-                            Image(systemName: "chart.xyaxis.line")
-                                .font(.system(size: 10))
-                        }
-                        .foregroundStyle(.secondary)
-
-                        HStack(spacing: 6) {
-                            SegmentButton(isSelected: settings.defaultChartTab == "line",
-                                          title: L.chartTabLine, fontSize: 12, padding: 6) {
-                                settings.defaultChartTab = "line"
-                            }
-                            SegmentButton(isSelected: settings.defaultChartTab == "heatmap",
-                                          title: L.chartTabHeatmap, fontSize: 12, padding: 6) {
-                                settings.defaultChartTab = "heatmap"
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.top, 10)
-                    .padding(.bottom, 6)
-
-                    // 차트 항상 펼치기
-                    HStack {
-                        Label {
-                            Text(L.chartExpandedByDefault)
-                                .font(.system(size: 12))
-                        } icon: {
-                            Image(systemName: "chevron.down.circle")
-                                .font(.system(size: 10))
-                        }
-
-                        Spacer()
-
-                        Toggle("", isOn: Binding(
-                            get: { settings.chartExpandedByDefault },
-                            set: { settings.chartExpandedByDefault = $0 }
-                        ))
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 10)
 
                     Divider()
 
@@ -491,110 +422,12 @@ struct SettingsView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
 
-                    Divider()
-
-                    // 섹션 표시 옵션
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label {
-                            Text(L.visibleSections)
-                                .font(.system(size: 11, weight: .semibold))
-                        } icon: {
-                            Image(systemName: "square.3.layers.3d")
-                                .font(.system(size: 10))
-                        }
-                        .foregroundStyle(.secondary)
-
-                        VStack(spacing: 2) {
-                            ForEach(MainSection.allCases) { section in
-                                let isOn = settings.visibleSections.contains(section)
-                                Button(action: {
-                                    if isOn {
-                                        settings.visibleSections.remove(section)
-                                    } else {
-                                        settings.visibleSections.insert(section)
-                                    }
-                                }) {
-                                    HStack {
-                                        Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
-                                            .font(.system(size: 14))
-                                            .foregroundStyle(isOn ? .blue : .secondary)
-                                        Text(section.label(settings.language))
-                                            .font(.system(size: 12))
-                                        Spacer()
-                                    }
-                                    .padding(.vertical, 5)
-                                    .padding(.horizontal, 8)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .fill(isOn ? Color.blue.opacity(0.08) : Color.clear)
-                                    )
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-
-                    Divider()
-
-                    // Status bar items
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label {
-                            Text(L.statusBarDisplay)
-                                .font(.system(size: 11, weight: .semibold))
-                        } icon: {
-                            Image(systemName: "menubar.rectangle")
-                                .font(.system(size: 10))
-                        }
-                        .foregroundStyle(.secondary)
-
-                        VStack(spacing: 2) {
-                            ForEach(StatusBarItem.allCases) { item in
-                                let isOn = settings.statusBarItems.contains(item)
-                                Button(action: {
-                                    if isOn {
-                                        settings.statusBarItems.remove(item)
-                                    } else {
-                                        settings.statusBarItems.insert(item)
-                                    }
-                                }) {
-                                    HStack {
-                                        Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
-                                            .font(.system(size: 14))
-                                            .foregroundStyle(isOn ? .green : .secondary)
-
-                                        Text(item.label(settings.language))
-                                            .font(.system(size: 12))
-
-                                        Spacer()
-
-                                        // 미리보기
-                                        Text(previewText(for: item))
-                                            .font(.system(size: 10, design: .monospaced))
-                                            .foregroundStyle(.tertiary)
-                                    }
-                                    .padding(.vertical, 5)
-                                    .padding(.horizontal, 8)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .fill(isOn ? Color.green.opacity(0.08) : Color.clear)
-                                    )
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
             }
             .id(settings.language)
             } // ScrollView
-            .frame(maxHeight: maxScrollHeight)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: settings.popoverSize.width)
+        .frame(minWidth: 300, maxWidth: .infinity, minHeight: 300, maxHeight: .infinity)
     }
 
     private func hotkeyDisplayString() -> String {
@@ -660,16 +493,154 @@ struct SettingsView: View {
         return (NSString(characters: &chars, length: length) as String).uppercased()
     }
 
-    private func previewText(for item: StatusBarItem) -> String {
-        switch item {
-        case .rateLimit: "5h 42%"
-        case .weeklyRateLimit: "1w 68%"
-        case .tokens: "12.3K"
-        case .weeklyTokens: "1.2M"
-        case .cost: "$1.23"
-        case .weeklyCost: "$15.40"
-        case .context: "ctx 65%"
-        case .extraUsage: "ex $13/$20"
+    // MARK: - Claude Environments Section
+
+    @ViewBuilder
+    private var environmentsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label {
+                    Text(L.environmentsTitle)
+                        .font(.system(size: 11, weight: .semibold))
+                } icon: {
+                    Image(systemName: "folder")
+                        .font(.system(size: 10))
+                }
+                .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button(action: rediscoverEnvironments) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(L.environmentRediscover)
+            }
+
+            ForEach(environments) { env in
+                environmentRow(env)
+            }
+
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private func environmentRow(_ env: ClaudeEnvironment) -> some View {
+        let override = settings.environmentOverrides[env.id] ?? EnvironmentOverride(alias: nil, enabled: true)
+        HStack(spacing: 8) {
+            Toggle("", isOn: Binding(
+                get: { override.enabled },
+                set: { newVal in
+                    var o = settings.environmentOverrides[env.id] ?? EnvironmentOverride()
+                    o.enabled = newVal
+                    settings.environmentOverrides[env.id] = o
+                }
+            ))
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .labelsHidden()
+
+            VStack(alignment: .leading, spacing: 1) {
+                TextField(env.shortName, text: Binding(
+                    get: { override.alias ?? "" },
+                    set: { newVal in
+                        var o = settings.environmentOverrides[env.id] ?? EnvironmentOverride()
+                        o.alias = newVal.isEmpty ? nil : newVal
+                        settings.environmentOverrides[env.id] = o
+                    }
+                ))
+                .font(.system(size: 11))
+                .textFieldStyle(.plain)
+
+                Text(env.folderName)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
+
+            if env.isDefault {
+                Text("default")
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(RoundedRectangle(cornerRadius: 3).fill(Color.secondary.opacity(0.15)))
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
+        .opacity(override.enabled ? 1.0 : 0.5)
+    }
+
+    private func rediscoverEnvironments() {
+        environments = ClaudeEnvironment.discoverAll()
+        // 새로 감지된 환경은 기본 enabled=true로. override에 없으면 그대로 둠.
+        NotificationCenter.default.post(name: .environmentOverridesChanged, object: nil)
+    }
+
+    // MARK: - Claude Accounts Section (계정별 별칭)
+
+    @ViewBuilder
+    private var accountsSection: some View {
+        let accounts = monitor.accountRateLimits
+        VStack(alignment: .leading, spacing: 8) {
+            Label {
+                Text(L.accountsTitle)
+                    .font(.system(size: 11, weight: .semibold))
+            } icon: {
+                Image(systemName: "person.crop.circle")
+                    .font(.system(size: 10))
+            }
+            .foregroundStyle(.secondary)
+
+            if accounts.isEmpty {
+                Text("—")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            } else {
+                ForEach(Array(accounts.enumerated()), id: \.element.id) { index, acc in
+                    accountRow(index: index + 1, account: acc)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private func accountRow(index: Int, account: AccountRateLimit) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                TextField(L.accountFallback(index), text: Binding(
+                    get: { settings.accountAliases[account.id] ?? "" },
+                    set: { newVal in
+                        let trimmed = newVal.trimmingCharacters(in: .whitespaces)
+                        if trimmed.isEmpty {
+                            settings.accountAliases.removeValue(forKey: account.id)
+                        } else {
+                            settings.accountAliases[account.id] = trimmed
+                        }
+                    }
+                ))
+                .font(.system(size: 11))
+                .textFieldStyle(.plain)
+
+                // "사용 환경: default, baroitda"
+                Text("\(L.accountUsedBy): \(account.environmentNames.joined(separator: ", "))")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
     }
 }

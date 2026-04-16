@@ -246,6 +246,29 @@ final class AppSettings {
         didSet { save() }
     }
 
+    /// Claude 환경별 사용자 재정의 (별칭/활성화)
+    var environmentOverrides: [String: EnvironmentOverride] {
+        didSet {
+            save()
+            NotificationCenter.default.post(name: .environmentOverridesChanged, object: nil)
+        }
+    }
+
+    /// 메뉴바 상태 텍스트 표시 방식 (전체 합산 / 환경별 나열 / 특정 환경)
+    var menuBarEnvMode: MenuBarEnvMode {
+        didSet { save() }
+    }
+
+    /// menuBarEnvMode == .primary 일 때 어떤 환경 id인지
+    var primaryEnvironmentID: String? {
+        didSet { save() }
+    }
+
+    /// Claude 계정(accountKey) → 사용자 지정 별칭
+    var accountAliases: [String: String] {
+        didSet { save() }
+    }
+
     private let defaults = UserDefaults.standard
 
     private init() {
@@ -314,6 +337,29 @@ final class AppSettings {
         alertThreshold3 = defaults.object(forKey: "alertThreshold3") as? Double ?? 90
         showDaysFormat = defaults.object(forKey: "showDaysFormat") as? Bool ?? false
         mainWindowFrame = defaults.string(forKey: "mainWindowFrame")
+
+        if let data = defaults.data(forKey: "environmentOverrides"),
+           let dict = try? JSONDecoder().decode([String: EnvironmentOverride].self, from: data) {
+            environmentOverrides = dict
+        } else {
+            environmentOverrides = [:]
+        }
+
+        if let raw = defaults.string(forKey: "menuBarEnvMode"),
+           let mode = MenuBarEnvMode(rawValue: raw) {
+            menuBarEnvMode = mode
+        } else {
+            menuBarEnvMode = .perEnvironment
+        }
+
+        primaryEnvironmentID = defaults.string(forKey: "primaryEnvironmentID")
+
+        if let data = defaults.data(forKey: "accountAliases"),
+           let dict = try? JSONDecoder().decode([String: String].self, from: data) {
+            accountAliases = dict
+        } else {
+            accountAliases = [:]
+        }
     }
 
     private func save() {
@@ -342,6 +388,18 @@ final class AppSettings {
             defaults.set(frame, forKey: "mainWindowFrame")
         } else {
             defaults.removeObject(forKey: "mainWindowFrame")
+        }
+        if let data = try? JSONEncoder().encode(environmentOverrides) {
+            defaults.set(data, forKey: "environmentOverrides")
+        }
+        defaults.set(menuBarEnvMode.rawValue, forKey: "menuBarEnvMode")
+        if let id = primaryEnvironmentID {
+            defaults.set(id, forKey: "primaryEnvironmentID")
+        } else {
+            defaults.removeObject(forKey: "primaryEnvironmentID")
+        }
+        if let data = try? JSONEncoder().encode(accountAliases) {
+            defaults.set(data, forKey: "accountAliases")
         }
     }
 }

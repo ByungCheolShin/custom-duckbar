@@ -136,6 +136,27 @@ enum L {
     static var interval1m: String { lang == .korean ? "1분" : "1m" }
     static var interval3m: String { lang == .korean ? "3분" : "3m" }
     static var interval5m: String { lang == .korean ? "5분" : "5m" }
+
+    // Claude Environments (멀티 환경)
+    static var environmentsTitle: String { lang == .korean ? "Claude 환경" : "Claude Environments" }
+    static var environmentAlias: String { lang == .korean ? "별칭" : "Alias" }
+    static var environmentEnabled: String { lang == .korean ? "활성화" : "Enabled" }
+    static var environmentRediscover: String { lang == .korean ? "재검색" : "Rediscover" }
+    static var environmentAggregated: String { lang == .korean ? "전체 합산" : "Aggregated" }
+    static var environmentNotAuthenticated: String { lang == .korean ? "미인증" : "Not authenticated" }
+    static var menuBarEnvModeLabel: String { lang == .korean ? "메뉴바 표시 모드" : "Menu Bar Mode" }
+    static var menuBarEnvModeAggregated: String { lang == .korean ? "전체 합산" : "Aggregated" }
+    static var menuBarEnvModePerEnv: String { lang == .korean ? "환경별 나열" : "Per-Environment" }
+    static var menuBarEnvModePrimary: String { lang == .korean ? "기본 환경만" : "Primary Only" }
+    static var primaryEnvironmentLabel: String { lang == .korean ? "기본 환경" : "Primary Environment" }
+
+    // Claude Accounts (계정별 별칭)
+    static var accountsTitle: String { lang == .korean ? "Claude 계정" : "Claude Accounts" }
+    static var accountAliasPlaceholder: String { lang == .korean ? "계정 이름" : "Account name" }
+    static func accountFallback(_ index: Int) -> String {
+        lang == .korean ? "계정 \(index)" : "Account \(index)"
+    }
+    static var accountUsedBy: String { lang == .korean ? "사용 환경" : "Used by" }
 }
 
 // MARK: - Notification Names
@@ -150,4 +171,5 @@ extension Notification.Name {
     static let openShareCard = Notification.Name("OpenShareCard")
     static let automaticUpdateCheckChanged = Notification.Name("AutomaticUpdateCheckChanged")
     static let automaticUpdateInstallChanged = Notification.Name("AutomaticUpdateInstallChanged")
+    static let environmentOverridesChanged = Notification.Name("EnvironmentOverridesChanged")
 }

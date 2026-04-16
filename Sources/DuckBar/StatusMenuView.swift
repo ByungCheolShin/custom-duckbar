@@ -5,19 +5,21 @@ struct StatusMenuView: View {
     let settings: AppSettings
     let onQuit: () -> Void
 
-    private enum ViewMode { case main, settings, help, history, badges }
+    private enum ViewMode { case main, settings, help }
     @State private var viewMode: ViewMode = .main
-    @State private var showChart: Bool
 
     init(monitor: SessionMonitor, settings: AppSettings, onQuit: @escaping () -> Void) {
         self.monitor = monitor
         self.settings = settings
         self.onQuit = onQuit
-        _showChart = State(initialValue: settings.chartExpandedByDefault)
+    }
+
+    /// 활성화된 환경 목록 (설정 화면 등에서 참조)
+    private var enabledEnvironments: [ClaudeEnvironment] {
+        monitor.environments.filter { $0.enabled }
     }
 
     private var s: CGFloat { settings.popoverSize.fontScale }
-    private var popoverWidth: CGFloat { settings.popoverSize.width }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -25,37 +27,23 @@ struct StatusMenuView: View {
             case .main:
                 mainView
             case .settings:
-                SettingsView(settings: settings, onHelp: { viewMode = .help }) {
+                SettingsView(settings: settings, monitor: monitor, onHelp: { viewMode = .help }) {
                     viewMode = .main
                 }
             case .help:
                 HelpView(settings: settings) {
                     viewMode = .main
                 }
-            case .history:
-                NotificationHistoryView(onDone: { viewMode = .main })
-            case .badges:
-                BadgeView(onDone: { viewMode = .main }, stats: monitor.usageStats)
             }
         }
-        .frame(width: popoverWidth)
+        .frame(minWidth: 300, maxWidth: .infinity, minHeight: 300, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear {
-            showChart = settings.chartExpandedByDefault
-        }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
             viewMode = .settings
         }
         .onReceive(NotificationCenter.default.publisher(for: .openHelp)) { _ in
             viewMode = .help
         }
-    }
-
-    /// 헤더 + 하단 메뉴를 제외한 스크롤 영역 최대 높이
-    private var maxScrollHeight: CGFloat {
-        let screenHeight = NSScreen.main?.visibleFrame.height ?? 800
-        // 헤더(~53pt) + 하단 메뉴(~44pt) + 팝오버 여백(~80pt)
-        return screenHeight - 177
     }
 
     private var mainView: some View {
@@ -65,89 +53,24 @@ struct StatusMenuView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if settings.activeProvider == .codex {
-                        // Codex는 세션 개념 없음
-                    } else if monitor.sessions.isEmpty {
-                        emptyStateView
-                    } else {
-                        sessionListView
-                    }
-
-                    if settings.visibleSections.contains(.rateLimits) {
-                        Divider()
-                        switch settings.activeProvider {
-                        case .claude: rateLimitsView
-                        case .codex:  codexRateLimitsView
-                        case .both:
-                            rateLimitsView
-                            codexRateLimitsView
-                        }
-                    }
-                    if settings.visibleSections.contains(.fiveHourTokens) {
-                        Divider()
+                    // 계정별 카드 — 가로 스크롤, 각 카드 세로 스택
+                    let showRL = settings.visibleSections.contains(.rateLimits)
+                    let showChart = settings.visibleSections.contains(.chart)
+                    if showRL || showChart {
                         switch settings.activeProvider {
                         case .claude:
-                            tokenUsageView(title: L.fiveHourWindow, tokens: monitor.usageStats.fiveHourTokens)
+                            claudePerAccountRows(showRL: showRL, showChart: showChart)
                         case .codex:
-                            codexTokenUsageView(title: L.fiveHourWindow, tokens: monitor.usageStats.codexFiveHourTokens)
+                            codexPerAccountRow(showRL: showRL, showChart: showChart)
                         case .both:
-                            tokenUsageView(title: "Claude · \(L.fiveHourWindow)", tokens: monitor.usageStats.fiveHourTokens)
-                            codexTokenUsageView(title: "Codex · \(L.fiveHourWindow)", tokens: monitor.usageStats.codexFiveHourTokens)
+                            claudePerAccountRows(showRL: showRL, showChart: showChart)
+                            codexPerAccountRow(showRL: showRL, showChart: showChart)
                         }
-                    }
-                    if settings.visibleSections.contains(.oneWeekTokens) {
-                        Divider()
-                        switch settings.activeProvider {
-                        case .claude:
-                            tokenUsageView(title: L.oneWeekWindow, tokens: monitor.usageStats.oneWeekTokens)
-                        case .codex:
-                            codexTokenUsageView(title: L.oneWeekWindow, tokens: monitor.usageStats.codexOneWeekTokens)
-                        case .both:
-                            tokenUsageView(title: "Claude · \(L.oneWeekWindow)", tokens: monitor.usageStats.oneWeekTokens)
-                            codexTokenUsageView(title: "Codex · \(L.oneWeekWindow)", tokens: monitor.usageStats.codexOneWeekTokens)
-                        }
-                    }
-                    if settings.visibleSections.contains(.chart) {
-                        Divider()
-                        switch settings.activeProvider {
-                        case .claude: chartToggleView
-                        case .codex:  codexChartToggleView
-                        case .both:
-                            chartToggleView
-                            codexChartToggleView
-                        }
-                    }
-                    if settings.visibleSections.contains(.modelUsage) && !monitor.usageStats.modelUsages.isEmpty && settings.activeProvider != .codex {
-                        Divider()
-                        modelUsageView
-                    }
-                    if settings.visibleSections.contains(.context) && settings.activeProvider != .codex {
-                        Divider()
-                        contextView
                     }
                 }
             }
-            .frame(maxHeight: maxScrollHeight)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            Spacer()
-                .frame(height: 10)
-
-            Divider()
-
-            HStack(spacing: 0) {
-                MenuButton(title: L.settings, icon: "gearshape") {
-                    viewMode = .settings
-                }
-                MenuButton(title: L.history, icon: "bell.badge") {
-                    viewMode = .history
-                }
-                MenuButton(title: L.badges, icon: "trophy") {
-                    viewMode = .badges
-                }
-                MenuButton(title: L.quit, icon: "power") {
-                    onQuit()
-                }
-            }
         }
     }
 
@@ -158,13 +81,6 @@ struct StatusMenuView: View {
             Text(L.appTitle)
                 .font(.system(size: 13 * s, weight: .semibold))
             Spacer()
-            Button(action: { openShareCardPreview() }) {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 11 * s))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help(L.shareCardPreview)
             Button(action: { Task { await monitor.refreshAsync() } }) {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 11 * s))
@@ -172,44 +88,216 @@ struct StatusMenuView: View {
             }
             .buttonStyle(.plain)
             .help(L.refresh)
+            Button(action: { viewMode = .settings }) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 11 * s))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(L.settings)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
 
-    private func openShareCardPreview() {
-        NotificationCenter.default.post(name: .openShareCard, object: nil)
-    }
+    /// 각 계정별 고정 컬럼 폭 (가로 스크롤 시)
+    private var accountColumnWidth: CGFloat { 420 }
 
-    // MARK: - Empty State
-
-    private var emptyStateView: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "moon.zzz")
-                .font(.system(size: 20 * s))
-                .foregroundStyle(.tertiary)
-            Text(L.noActiveSessions)
-                .font(.system(size: 11 * s))
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 16)
-    }
-
-    // MARK: - Session List
-
-    private var sessionListView: some View {
-        LazyVStack(spacing: 0) {
-            ForEach(monitor.sessions) { session in
-                SessionRowView(session: session, fontScale: s)
+    /// Claude 계정별 레이아웃.
+    /// - 계정 ≤ 1개: 전체 폭 세로 스택 (사용한도 → 라인 → 히트맵)
+    /// - 계정 ≥ 2개: 가로 ScrollView, 각 계정은 고정 폭 세로 스택
+    @ViewBuilder
+    private func claudePerAccountRows(showRL: Bool, showChart: Bool) -> some View {
+        let accounts = monitor.accountRateLimits
+        if accounts.isEmpty {
+            accountColumnView(
+                label: nil,
+                stats: monitor.usageStats,
+                fiveH: nil,
+                weekly: nil,
+                showRL: showRL,
+                showChart: showChart,
+                fixedWidth: nil
+            )
+        } else if accounts.count == 1 {
+            let acc = accounts[0]
+            let stats = monitor.accountStats[acc.id] ?? monitor.usageStats
+            accountColumnView(
+                label: nil, // 계정 1개면 헤더 생략
+                stats: stats,
+                fiveH: acc.rateLimits.isLoaded ? acc.rateLimits.fiveHourPercent : nil,
+                weekly: acc.rateLimits.isLoaded ? acc.rateLimits.weeklyPercent : nil,
+                showRL: showRL,
+                showChart: showChart,
+                fixedWidth: nil
+            )
+        } else {
+            ScrollView(.horizontal, showsIndicators: true) {
+                HStack(alignment: .top, spacing: 16) {
+                    ForEach(Array(accounts.enumerated()), id: \.element.id) { index, acc in
+                        let stats = monitor.accountStats[acc.id] ?? UsageStats()
+                        accountColumnView(
+                            label: accountLabel(for: acc, index: index + 1),
+                            stats: stats,
+                            fiveH: acc.rateLimits.isLoaded ? acc.rateLimits.fiveHourPercent : nil,
+                            weekly: acc.rateLimits.isLoaded ? acc.rateLimits.weeklyPercent : nil,
+                            showRL: showRL,
+                            showChart: showChart,
+                            fixedWidth: accountColumnWidth
+                        )
+                    }
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 4)
             }
         }
     }
 
-    // MARK: - Rate Limits
+    /// 한 계정 컬럼 (세로: 라벨 → 사용한도 → 라인 → 히트맵)
+    @ViewBuilder
+    private func accountColumnView(label: String?,
+                                    stats: UsageStats,
+                                    fiveH: Double?,
+                                    weekly: Double?,
+                                    showRL: Bool,
+                                    showChart: Bool,
+                                    fixedWidth: CGFloat?) -> some View {
+        let content = VStack(alignment: .leading, spacing: 4) {
+            if let label {
+                Text(label)
+                    .font(.system(size: 11 * s, weight: .bold))
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 6)
+            }
+            if showRL {
+                rateLimitsViewForAccount(fiveH: fiveH, weekly: weekly)
+            }
+            if showChart {
+                lineChartViewForAccount(stats: stats, fiveH: fiveH, weekly: weekly)
+                heatmapChartViewForAccount(stats: stats, fiveH: fiveH)
+            }
+        }
 
-    private var rateLimitsView: some View {
-        let rl = monitor.usageStats.rateLimits
+        if let w = fixedWidth {
+            content
+                .frame(width: w, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.primary.opacity(0.03))
+                )
+        } else {
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// 단일 계정용 사용한도 뷰 (RateLimits를 직접 받지 않고 %만 받아서 UsageStats 어댑터 사용)
+    private func rateLimitsViewForAccount(fiveH: Double?, weekly: Double?) -> some View {
+        var rl = RateLimits()
+        if let fiveH { rl.fiveHourPercent = fiveH; rl.isLoaded = true }
+        if let weekly { rl.weeklyPercent = weekly; rl.isLoaded = true }
+        // 리셋 시간 등 추가 정보는 현재 전체 합산 rateLimits에서 가져옴 (계정 단위 정보는 제공 안 됨)
+        rl.fiveHourResetsAt = monitor.usageStats.rateLimits.fiveHourResetsAt
+        rl.weeklyResetsAt = monitor.usageStats.rateLimits.weeklyResetsAt
+        rl.extraUsageLoaded = monitor.usageStats.rateLimits.extraUsageLoaded
+        rl.extraUsageEnabled = monitor.usageStats.rateLimits.extraUsageEnabled
+        rl.extraUsageUsed = monitor.usageStats.rateLimits.extraUsageUsed
+        rl.extraUsageLimit = monitor.usageStats.rateLimits.extraUsageLimit
+        rl.extraUsageUtilization = monitor.usageStats.rateLimits.extraUsageUtilization
+        rl.extraUsageResetsAt = monitor.usageStats.rateLimits.extraUsageResetsAt
+        rl.opusWeeklyPercent = monitor.usageStats.rateLimits.opusWeeklyPercent
+        rl.sonnetWeeklyPercent = monitor.usageStats.rateLimits.sonnetWeeklyPercent
+        var stats = UsageStats(); stats.rateLimits = rl
+        return rateLimitsView(stats)
+    }
+
+    private func lineChartViewForAccount(stats: UsageStats, fiveH: Double?, weekly: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            chartSectionHeader(L.chartTabLine)
+            RateLimitChartView(
+                hourlyData: stats.hourlyData,
+                weeklyHourlyData: stats.weeklyHourlyData,
+                fiveHourPercent: fiveH,
+                weeklyPercent: weekly,
+                fontScale: s
+            )
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private func heatmapChartViewForAccount(stats: UsageStats, fiveH: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            chartSectionHeader(L.chartTabHeatmap)
+            RateLimitHeatmapView(
+                weeklyHourlyData: stats.weeklyHourlyData,
+                currentPercent: fiveH,
+                rollingHours: 5,
+                fontScale: s,
+                tint: .blue
+            )
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        }
+    }
+
+    /// Codex 행: Codex 카드를 가로 스크롤로 (현재 1개지만 확장 가능)
+    @ViewBuilder
+    private func codexPerAccountRow(showRL: Bool, showChart: Bool) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 16) {
+                codexAccountColumnView(showRL: showRL, showChart: showChart, fixedWidth: accountColumnWidth)
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 4)
+        }
+    }
+
+    /// Codex 계정 카드 — Claude 카드와 동일 사이즈/스타일
+    @ViewBuilder
+    private func codexAccountColumnView(showRL: Bool, showChart: Bool, fixedWidth: CGFloat?) -> some View {
+        let content = VStack(alignment: .leading, spacing: 4) {
+            Text("Codex")
+                .font(.system(size: 11 * s, weight: .bold))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 14)
+                .padding(.top, 6)
+            if showRL {
+                codexRateLimitsView
+            }
+            if showChart {
+                codexLineChartView()
+                codexHeatmapChartView()
+            }
+        }
+
+        if let w = fixedWidth {
+            content
+                .frame(width: w, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.primary.opacity(0.03))
+                )
+        } else {
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // MARK: - Rate Limits (계정 단위)
+
+    /// Claude Rate Limit 섹션. 탭 선택과 무관하게 계정 단위로 표시.
+    /// 계정의 표시 라벨: 사용자가 지정한 별칭 > "계정 #N"
+    private func accountLabel(for account: AccountRateLimit, index: Int) -> String {
+        if let alias = settings.accountAliases[account.id], !alias.isEmpty {
+            return alias
+        }
+        return L.accountFallback(index)
+    }
+
+    private func rateLimitsView(_ stats: UsageStats) -> some View {
+        let rl = stats.rateLimits
         return VStack(alignment: .leading, spacing: 6) {
             Text(L.rateLimits)
                 .font(.system(size: 11 * s, weight: .semibold))
@@ -377,220 +465,47 @@ struct StatusMenuView: View {
         .padding(.vertical, 8)
     }
 
-    // MARK: - Token Usage
+    // MARK: - Codex Chart
 
-    private func tokenUsageView(title: String, tokens: TokenUsage) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                    .font(.system(size: 11 * s, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(TokenUsage.formatTokens(tokens.totalTokens))
-                    .font(.system(size: 10 * s, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.primary)
-                Text("·")
-                    .foregroundStyle(.tertiary)
-                Text("\(tokens.requestCount) \(L.requests)")
-                    .font(.system(size: 10 * s))
-                    .foregroundStyle(.tertiary)
-                Text("·")
-                    .foregroundStyle(.tertiary)
-                Text(TokenUsage.formatCost(tokens.estimatedCostUSD))
-                    .font(.system(size: 10 * s, weight: .medium, design: .monospaced))
-                    .foregroundStyle(costColor(tokens.estimatedCostUSD))
-            }
-
-            HStack(spacing: 0) {
-                tokenPill(label: L.tokenIn, value: tokens.inputTokens, color: .blue)
-                tokenPill(label: L.tokenOut, value: tokens.outputTokens, color: .green)
-                tokenPill(label: L.tokenCacheWrite, value: tokens.cacheCreationTokens, color: .orange)
-                tokenPill(label: L.tokenCacheRead, value: tokens.cacheReadTokens, color: .purple)
-            }
-
-            // 캐시 효율
-            let totalInput = tokens.inputTokens + tokens.cacheCreationTokens + tokens.cacheReadTokens
-            let cacheRate = totalInput > 0 ? Double(tokens.cacheReadTokens) / Double(totalInput) * 100 : 0
-            HStack(spacing: 4) {
-                Text(L.cacheHit)
-                    .font(.system(size: 9 * s))
-                    .foregroundStyle(.tertiary)
-                ProgressBarView(
-                    value: cacheRate / 100,
-                    color: .purple
-                )
-                .frame(height: 4)
-                Text(String(format: "%.1f%%", cacheRate))
-                    .font(.system(size: 9 * s, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-    }
-
-    // MARK: - Codex Token Usage
-
-    private func codexTokenUsageView(title: String, tokens: CodexTokenUsage) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                    .font(.system(size: 11 * s, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(TokenUsage.formatTokens(tokens.totalTokens))
-                    .font(.system(size: 10 * s, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.primary)
-                Text("·")
-                    .foregroundStyle(.tertiary)
-                Text("\(tokens.requestCount) \(L.requests)")
-                    .font(.system(size: 10 * s))
-                    .foregroundStyle(.tertiary)
-                Text("·")
-                    .foregroundStyle(.tertiary)
-                Text(TokenUsage.formatCost(tokens.estimatedCostUSD))
-                    .font(.system(size: 10 * s, weight: .medium, design: .monospaced))
-                    .foregroundStyle(costColor(tokens.estimatedCostUSD))
-            }
-
-            HStack(spacing: 0) {
-                tokenPill(label: L.tokenIn, value: tokens.inputTokens, color: .blue)
-                tokenPill(label: L.tokenOut, value: tokens.outputTokens, color: .green)
-                tokenPill(label: L.tokenCacheRead, value: tokens.cachedInputTokens, color: .purple)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-    }
-
-    // MARK: - Chart Toggle
-
-    private var chartToggleView: some View {
+    private func codexLineChartView() -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button(action: {
-                showChart.toggle()
-            }) {
-                HStack {
-                    Image(systemName: "chart.line.uptrend.xyaxis")
-                        .font(.system(size: 10 * s))
-                        .foregroundStyle(.secondary)
-                    Text(L.chart)
-                        .font(.system(size: 11 * s, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Image(systemName: showChart ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 9 * s))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            TokenChartView(
-                hourlyData: monitor.usageStats.hourlyData,
-                weeklyHourlyData: monitor.usageStats.weeklyHourlyData,
-                fontScale: s,
-                defaultTab: settings.defaultChartTab
-            )
-            .frame(height: showChart ? nil : 0, alignment: .top)
-            .clipped()
-        }
-    }
-
-    // MARK: - Codex Chart Toggle
-
-    private var codexChartToggleView: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button(action: { showChart.toggle() }) {
-                HStack {
-                    Image(systemName: "chart.line.uptrend.xyaxis")
-                        .font(.system(size: 10 * s))
-                        .foregroundStyle(.secondary)
-                    Text(L.chart)
-                        .font(.system(size: 11 * s, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Image(systemName: showChart ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 9 * s))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            TokenChartView(
+            chartSectionHeader(L.chartTabLine)
+            RateLimitChartView(
                 hourlyData: monitor.usageStats.codexHourlyData,
                 weeklyHourlyData: monitor.usageStats.codexWeeklyHourlyData,
-                fontScale: s,
-                defaultTab: settings.defaultChartTab
+                fiveHourPercent: nil,
+                weeklyPercent: monitor.usageStats.codexRateLimits.isLoaded ? monitor.usageStats.codexRateLimits.usedPercent : nil,
+                fontScale: s
             )
-            .frame(height: showChart ? nil : 0, alignment: .top)
-            .clipped()
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
         }
     }
 
-    // MARK: - Model Usage
+    private func codexHeatmapChartView() -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            chartSectionHeader(L.chartTabHeatmap)
+            RateLimitHeatmapView(
+                weeklyHourlyData: monitor.usageStats.codexWeeklyHourlyData,
+                currentPercent: monitor.usageStats.codexRateLimits.isLoaded ? monitor.usageStats.codexRateLimits.usedPercent : nil,
+                rollingHours: 168,
+                fontScale: s,
+                tint: .orange
+            )
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        }
+    }
 
-    private var modelUsageView: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(L.modelUsage)
+    private func chartSectionHeader(_ title: String) -> some View {
+        HStack {
+            Image(systemName: "chart.line.uptrend.xyaxis")
+                .font(.system(size: 10 * s))
+                .foregroundStyle(.secondary)
+            Text(title)
                 .font(.system(size: 11 * s, weight: .semibold))
                 .foregroundStyle(.secondary)
-
-            ForEach(monitor.usageStats.modelUsages) { mu in
-                HStack(spacing: 6) {
-                    Text(mu.shortName)
-                        .font(.system(size: 10 * s, weight: .medium))
-                        .foregroundStyle(mu.modelName.contains("opus") ? .purple : mu.modelName.contains("sonnet") ? .blue : .green)
-                        .frame(width: 44 * s, alignment: .leading)
-
-                    Text(TokenUsage.formatTokens(mu.totalTokens))
-                        .font(.system(size: 10 * s, design: .monospaced))
-                        .frame(width: 44 * s, alignment: .trailing)
-
-                    // 비율 바
-                    let maxTokens = monitor.usageStats.modelUsages.first?.totalTokens ?? 1
-                    ProgressBarView(
-                        value: Double(mu.totalTokens) / Double(max(maxTokens, 1)),
-                        color: mu.modelName.contains("opus") ? .purple : mu.modelName.contains("sonnet") ? .blue : .green
-                    )
-                    .frame(height: 4)
-
-                    Text(TokenUsage.formatCost(mu.estimatedCostUSD))
-                        .font(.system(size: 9 * s, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 44 * s, alignment: .trailing)
-                }
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-    }
-
-    // MARK: - Context
-
-    private var contextView: some View {
-        let ctx = monitor.usageStats.contextInfo
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(L.context)
-                    .font(.system(size: 11 * s, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text("\(TokenUsage.formatTokens(ctx.usedTokens)) / \(TokenUsage.formatTokens(ctx.maxContextTokens))")
-                    .font(.system(size: 10 * s, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-
-            ProgressBarView(
-                value: ctx.usagePercent,
-                color: contextColor(ctx.usagePercent)
-            )
-            .frame(height: 5)
+            Spacer()
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -620,21 +535,6 @@ struct StatusMenuView: View {
         if percent >= 0.8 { return .red }
         if percent >= 0.5 { return .orange }
         return .blue
-    }
-
-    private func tokenPill(label: String, value: Int, color: Color) -> some View {
-        VStack(spacing: 1) {
-            Text(TokenUsage.formatTokens(value))
-                .font(.system(size: 10 * s, weight: .medium, design: .monospaced))
-            Text(label)
-                .font(.system(size: 8 * s))
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 3)
-        .background(color.opacity(0.1))
-        .cornerRadius(4)
-        .padding(.horizontal, 1)
     }
 }
 

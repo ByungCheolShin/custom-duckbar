@@ -6,16 +6,18 @@ struct TokenChartView: View {
     let weeklyHourlyData: [HourlyTokenData]
     let fontScale: CGFloat
     let defaultTab: String
+    let showTabSelector: Bool
 
     private var s: CGFloat { fontScale }
 
     @State private var selectedTab: ChartTab = .line
 
-    init(hourlyData: [HourlyTokenData], weeklyHourlyData: [HourlyTokenData], fontScale: CGFloat, defaultTab: String) {
+    init(hourlyData: [HourlyTokenData], weeklyHourlyData: [HourlyTokenData], fontScale: CGFloat, defaultTab: String, showTabSelector: Bool = true) {
         self.hourlyData = hourlyData
         self.weeklyHourlyData = weeklyHourlyData
         self.fontScale = fontScale
         self.defaultTab = defaultTab
+        self.showTabSelector = showTabSelector
         _selectedTab = State(initialValue: defaultTab == "heatmap" ? .heatmap : .line)
     }
 
@@ -32,14 +34,16 @@ struct TokenChartView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 4) {
-                ForEach(ChartTab.allCases, id: \.label) { tab in
-                    SegmentButton(
-                        isSelected: selectedTab == tab,
-                        title: tab.label,
-                        fontSize: 10 * s,
-                        padding: 4
-                    ) { selectedTab = tab }
+            if showTabSelector {
+                HStack(spacing: 4) {
+                    ForEach(ChartTab.allCases, id: \.label) { tab in
+                        SegmentButton(
+                            isSelected: selectedTab == tab,
+                            title: tab.label,
+                            fontSize: 10 * s,
+                            padding: 4
+                        ) { selectedTab = tab }
+                    }
                 }
             }
 
@@ -59,7 +63,6 @@ struct TokenChartView: View {
     private var lineChartSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             tokenChart
-            costChart
         }
     }
 
@@ -95,46 +98,6 @@ struct TokenChartView: View {
                     AxisValueLabel {
                         if let v = value.as(Int.self) {
                             Text(TokenUsage.formatTokens(v)).font(.system(size: 8 * s))
-                        }
-                    }
-                }
-            }
-            .frame(height: 80 * s)
-        }
-    }
-
-    private var costChart: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(L.costChart)
-                .font(.system(size: 10 * s, weight: .medium))
-                .foregroundStyle(.secondary)
-
-            Chart(hourlyData) { point in
-                LineMark(x: .value("시간", point.hour), y: .value("비용", point.estimatedCostUSD))
-                    .foregroundStyle(.orange)
-                    .interpolationMethod(.catmullRom)
-                AreaMark(x: .value("시간", point.hour), y: .value("비용", point.estimatedCostUSD))
-                    .foregroundStyle(.orange.opacity(0.1))
-                    .interpolationMethod(.catmullRom)
-            }
-            .chartXAxis {
-                AxisMarks(values: .stride(by: .hour, count: 6)) { value in
-                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2]))
-                        .foregroundStyle(Color.gray.opacity(0.3))
-                    AxisValueLabel {
-                        if let date = value.as(Date.self) {
-                            Text(formatHour(date)).font(.system(size: 8 * s))
-                        }
-                    }
-                }
-            }
-            .chartYAxis {
-                AxisMarks(position: .leading) { value in
-                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2]))
-                        .foregroundStyle(Color.gray.opacity(0.2))
-                    AxisValueLabel {
-                        if let v = value.as(Double.self) {
-                            Text(TokenUsage.formatCost(v)).font(.system(size: 8 * s))
                         }
                     }
                 }

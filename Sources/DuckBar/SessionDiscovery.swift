@@ -3,39 +3,51 @@ import CommonCrypto
 import Darwin
 
 struct SessionDiscovery {
+    let env: ClaudeEnvironment
     private let claudeDir: URL
-    private let sessionsDir: URL
+    let sessionsDir: URL
     private let projectsDir: URL
     private let desktopAgentSessionsDir: URL
+    private let includeCodex: Bool        // default env만 Codex 집계
+    private let includeDesktopAgent: Bool // default env만 Claude.app agent 집계
     private let fm = FileManager.default
 
-    // All-time stats 캐시 (파일 mtime 기반 증분 처리)
-    private static var cachedAllTimeTokens: Int = 0
-    private static var cachedAllTimeCost: Double = 0.0
-    private static var cachedFileMtimes: [String: Date] = [:]  // path → last modified
+    // All-time stats 캐시 (환경별 격리, 파일 mtime 기반 증분 처리)
+    private static var cachedAllTimeTokensByEnv: [String: Int] = [:]
+    private static var cachedAllTimeCostByEnv: [String: Double] = [:]
+    private static var cachedFileMtimesByEnv: [String: [String: Date]] = [:]
 
+    /// 기본 환경(`~/.claude`)용 편의 생성자
     init() {
+        self.init(env: ClaudeEnvironment.defaultEnvironment)
+    }
+
+    init(env: ClaudeEnvironment) {
+        self.env = env
+        self.claudeDir = env.path
+        self.sessionsDir = env.path.appendingPathComponent("sessions")
+        self.projectsDir = env.path.appendingPathComponent("projects")
+        self.includeCodex = env.isDefault
+        self.includeDesktopAgent = env.isDefault
         let home = fm.homeDirectoryForCurrentUser
-        claudeDir = home.appendingPathComponent(".claude")
-        sessionsDir = claudeDir.appendingPathComponent("sessions")
-        projectsDir = claudeDir.appendingPathComponent("projects")
-        desktopAgentSessionsDir = home
+        self.desktopAgentSessionsDir = home
             .appendingPathComponent("Library/Application Support/Claude/local-agent-mode-sessions")
     }
 
-    /// CLI projects + Desktop App agent mode의 모든 프로젝트 하위 디렉토리 반환
+    /// CLI projects (+ default env는 Desktop App agent mode도 포함)의 모든 프로젝트 하위 디렉토리 반환
     private func allProjectSubDirs() -> [URL] {
         var dirs: [URL] = []
 
-        // 1. CLI: ~/.claude/projects/{hash}/
+        // 1. CLI: <env>/projects/{hash}/
         if let children = try? fm.contentsOfDirectory(
             at: projectsDir, includingPropertiesForKeys: nil
         ) {
             dirs.append(contentsOf: children)
         }
 
-        // 2. Desktop App: local-agent-mode-sessions/.../.claude/projects/{hash}/
-        if let topDirs = try? fm.contentsOfDirectory(
+        // 2. Desktop App (default env에서만): local-agent-mode-sessions/.../.claude/projects/{hash}/
+        if includeDesktopAgent,
+           let topDirs = try? fm.contentsOfDirectory(
             at: desktopAgentSessionsDir, includingPropertiesForKeys: nil
         ) {
             for d1 in topDirs {
@@ -127,7 +139,12 @@ struct SessionDiscovery {
     // MARK: - All Time Stats (마일스톤용)
 
     private func loadAllTimeStats(_ stats: inout UsageStats) {
-        // 증분 캐싱: 변경된 파일만 재파싱 (595MB 전체 파싱 방지)
+        // 증분 캐싱: 변경된 파일만 재파싱 (595MB 전체 파싱 방지, 환경별 격리)
+        let envKey = env.id
+        var cachedTokens = SessionDiscovery.cachedAllTimeTokensByEnv[envKey] ?? 0
+        var cachedCost = SessionDiscovery.cachedAllTimeCostByEnv[envKey] ?? 0.0
+        var cachedMtimes = SessionDiscovery.cachedFileMtimesByEnv[envKey] ?? [:]
+
         var deltaTokens = 0
         var deltaCost = 0.0
 
@@ -141,7 +158,7 @@ struct SessionDiscovery {
                 let mtime = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
 
                 // mtime이 캐시와 같으면 스킵
-                if let cached = SessionDiscovery.cachedFileMtimes[path],
+                if let cached = cachedMtimes[path],
                    let current = mtime, cached == current {
                     continue
                 }
@@ -174,14 +191,17 @@ struct SessionDiscovery {
 
                 deltaTokens += fileTokens
                 deltaCost += fileCost
-                SessionDiscovery.cachedFileMtimes[path] = mtime
+                cachedMtimes[path] = mtime
             }
         }
 
-        SessionDiscovery.cachedAllTimeTokens += deltaTokens
-        SessionDiscovery.cachedAllTimeCost += deltaCost
-        stats.allTimeTokens = SessionDiscovery.cachedAllTimeTokens
-        stats.allTimeCostUSD = SessionDiscovery.cachedAllTimeCost
+        cachedTokens += deltaTokens
+        cachedCost += deltaCost
+        SessionDiscovery.cachedAllTimeTokensByEnv[envKey] = cachedTokens
+        SessionDiscovery.cachedAllTimeCostByEnv[envKey] = cachedCost
+        SessionDiscovery.cachedFileMtimesByEnv[envKey] = cachedMtimes
+        stats.allTimeTokens = cachedTokens
+        stats.allTimeCostUSD = cachedCost
     }
 
     // MARK: - Codex Usage
@@ -371,13 +391,27 @@ struct SessionDiscovery {
         // 4. stats-cache.json에서 모델별 사용량 로드
         loadModelUsageFromStatsCache(&stats)
 
-        // 5. Codex 사용량 로드
-        loadCodexUsageStats(into: &stats)
+        // 5. Codex 사용량 로드 (default env에서만)
+        if includeCodex {
+            loadCodexUsageStats(into: &stats)
+        }
 
         // 6. 전체 누적 집계 (마일스톤용)
         loadAllTimeStats(&stats)
 
         return stats
+    }
+
+    /// Rate limit만 개별적으로 조회 (계정별 중복 제거용으로 SessionMonitor에서 호출)
+    func loadRateLimitsOnly() -> RateLimits {
+        var stats = UsageStats()
+        loadRateLimitsFromCache(&stats)
+        return stats.rateLimits
+    }
+
+    /// 이 환경의 OAuth 토큰을 읽어 반환 (없으면 nil). SessionMonitor에서 계정 식별용으로 사용.
+    func readAccessTokenForAccountKey() -> String? {
+        readOAuthToken()
     }
 
     // MARK: - Model Name from JSONL (세션별)
@@ -813,17 +847,73 @@ struct SessionDiscovery {
     }
 
     private func readOAuthToken() -> String? {
-        // 1. Claude Code 키체인 시도
-        if let token = readClaudeCodeToken() { return token }
-        // 2. Claude.app config.json 시도 (Claude Code 없는 경우)
-        return readClaudeAppToken()
+        // 1. 환경별 Keychain 서비스에서 시도 (default는 "Claude Code-credentials",
+        //    비기본 환경은 "Claude Code-credentials-<hash>" 접미사 붙음)
+        for service in Self.keychainServiceCandidates(for: env) {
+            if let token = Self.readTokenFromKeychain(service: service) {
+                return token
+            }
+        }
+
+        // 2. 기본 환경만 Claude.app config.json 시도 (Claude Code 없는 경우 폴백)
+        if env.isDefault {
+            return readClaudeAppToken()
+        }
+        return nil
     }
 
-    private func readClaudeCodeToken() -> String? {
+    /// 환경에 대응할 수 있는 Keychain 서비스 이름 후보를 반환.
+    /// Claude CLI 내부 명명 규칙이 `Claude Code-credentials[-<suffix>]` 형태.
+    /// 기본 환경은 접미사 없음, 비기본 환경은 전체 enumerate 결과 중 매칭되는 후보 전부를 시도.
+    private static func keychainServiceCandidates(for env: ClaudeEnvironment) -> [String] {
+        if env.isDefault {
+            return ["Claude Code-credentials"]
+        }
+        // 전체 "Claude Code-credentials*" 서비스 enumerate하되 default(접미사 없음)는 제외
+        let all = enumerateClaudeKeychainServices()
+        return all.filter { $0 != "Claude Code-credentials" }
+    }
+
+    /// `security dump-keychain`으로 "Claude Code-credentials*" 서비스 전체 이름 수집
+    private static func enumerateClaudeKeychainServices() -> [String] {
         let pipe = Pipe()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
+        process.arguments = ["dump-keychain"]
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return [] }
+
+        // 출력이 크므로 백그라운드에서 읽기
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+
+        guard let str = String(data: data, encoding: .utf8) else { return [] }
+
+        // "svce"<blob>="Claude Code-credentials-XXX" 라인 찾기
+        var services: Set<String> = []
+        for line in str.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("\"svce\"") else { continue }
+            // 패턴: "svce"<blob>="Claude Code-credentials-abc123"
+            if let eq = trimmed.range(of: "="),
+               let start = trimmed.range(of: "\"", range: eq.upperBound..<trimmed.endIndex)?.upperBound,
+               let end = trimmed.range(of: "\"", options: .backwards)?.lowerBound,
+               start < end {
+                let name = String(trimmed[start..<end])
+                if name.hasPrefix("Claude Code-credentials") {
+                    services.insert(name)
+                }
+            }
+        }
+        return Array(services).sorted()
+    }
+
+    private static func readTokenFromKeychain(service: String) -> String? {
+        let pipe = Pipe()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = ["find-generic-password", "-s", service, "-w"]
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
         do { try process.run(); process.waitUntilExit() } catch { return nil }
@@ -1098,5 +1188,84 @@ struct SessionDiscovery {
         if let d = f.date(from: str) { return d }
         f.formatOptions = [.withInternetDateTime]
         return f.date(from: str)
+    }
+}
+
+// MARK: - ClaudeEnvironment discovery & token hashing
+
+extension ClaudeEnvironment {
+    /// 기본 환경(`~/.claude`)
+    static var defaultEnvironment: ClaudeEnvironment {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let path = home.appendingPathComponent(".claude")
+        return ClaudeEnvironment(
+            id: stableID(for: path),
+            folderName: ".claude",
+            shortName: "default",
+            path: path
+        )
+    }
+
+    /// 홈 디렉토리에서 모든 Claude 환경을 자동 발견.
+    /// 조건: 이름이 `.claude` 또는 `.claude-*` 이면서 내부에 `projects` 또는 `sessions` 디렉토리가 있는 곳.
+    static func discoverAll(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [ClaudeEnvironment] {
+        let fm = FileManager.default
+        guard let children = try? fm.contentsOfDirectory(
+            at: home,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        ) else {
+            return [defaultEnvironment]
+        }
+
+        var envs: [ClaudeEnvironment] = []
+        for url in children {
+            let name = url.lastPathComponent
+            guard name == ".claude" || name.hasPrefix(".claude-") else { continue }
+            // claude-code-usage 같은 외부 도구 폴더는 제외
+            if name == ".claude-code-usage" { continue }
+            // 디렉토리만
+            let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+            guard isDir else { continue }
+            // projects 또는 sessions 하위 디렉토리 존재 확인
+            let hasProjects = fm.fileExists(atPath: url.appendingPathComponent("projects").path)
+            let hasSessions = fm.fileExists(atPath: url.appendingPathComponent("sessions").path)
+            guard hasProjects || hasSessions else { continue }
+
+            let short = name == ".claude" ? "default" : String(name.dropFirst(".claude-".count))
+            envs.append(ClaudeEnvironment(
+                id: stableID(for: url),
+                folderName: name,
+                shortName: short.isEmpty ? "default" : short,
+                path: url
+            ))
+        }
+
+        // default가 없으면 강제 추가 (기존 사용자 보호)
+        if !envs.contains(where: { $0.isDefault }) {
+            envs.insert(defaultEnvironment, at: 0)
+        }
+
+        // 정렬: default 우선, 그다음 shortName 알파벳
+        envs.sort { a, b in
+            if a.isDefault != b.isDefault { return a.isDefault }
+            return a.shortName < b.shortName
+        }
+        return envs
+    }
+
+    /// 경로 기반 안정 해시 (SHA1 → 16자 hex)
+    static func stableID(for url: URL) -> String {
+        let bytes = Array(url.path.utf8)
+        var digest = [UInt8](repeating: 0, count: Int(CC_SHA1_DIGEST_LENGTH))
+        CC_SHA1(bytes, CC_LONG(bytes.count), &digest)
+        return digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// OAuth access token에서 계정 식별 키(SHA-256 앞 16자) 계산
+    static func accountKey(fromToken token: String) -> String {
+        let bytes = Array(token.utf8)
+        var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        CC_SHA256(bytes, CC_LONG(bytes.count), &digest)
+        return digest.prefix(8).map { String(format: "%02x", $0) }.joined()
     }
 }

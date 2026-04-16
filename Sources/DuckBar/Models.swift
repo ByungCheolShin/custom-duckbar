@@ -16,6 +16,54 @@ enum Provider: String, CaseIterable, Codable {
     }
 }
 
+// MARK: - Claude Environment (멀티 홈 디렉토리 지원)
+
+/// 하나의 Claude Code 환경 (예: ~/.claude, ~/.claude-baroitda)을 나타냄
+struct ClaudeEnvironment: Identifiable, Equatable, Codable, Hashable {
+    let id: String           // 경로 기반 안정 해시
+    let folderName: String   // ".claude", ".claude-baroitda"
+    let shortName: String    // "default", "baroitda"
+    let path: URL            // ~/.claude-baroitda 의 URL
+    var alias: String?       // 사용자 별칭 (nil이면 shortName 사용)
+    var enabled: Bool = true
+    var accountKey: String?  // OAuth 토큰 SHA-256 앞 16자 (계정 중복 제거용)
+
+    var displayName: String { alias?.isEmpty == false ? alias! : shortName }
+    var isDefault: Bool { folderName == ".claude" }
+
+    private enum CodingKeys: String, CodingKey { case id, folderName, shortName, path, alias, enabled, accountKey }
+}
+
+/// 사용자가 환경별로 재정의한 설정 (UserDefaults에 저장)
+struct EnvironmentOverride: Codable, Equatable {
+    var alias: String?
+    var enabled: Bool
+
+    init(alias: String? = nil, enabled: Bool = true) {
+        self.alias = alias
+        self.enabled = enabled
+    }
+}
+
+// MARK: - Menu Bar Environment Mode
+
+enum MenuBarEnvMode: String, CaseIterable, Codable {
+    case aggregated     // 전체 합산 한 줄
+    case perEnvironment // 환경별 나열 (def 45% · bar 12%)
+    case primary        // 특정 환경만 (id 저장은 별도 필드)
+}
+
+// MARK: - Account Rate Limit (계정 단위 rate limit)
+
+/// 하나의 Anthropic 계정에 대한 Rate Limit 정보.
+/// 여러 환경(`~/.claude-*`)이 같은 계정을 공유할 수 있으므로 환경 목록을 함께 보관.
+struct AccountRateLimit: Identifiable, Equatable {
+    let id: String                  // accountKey (SHA-256 prefix)
+    let environmentIDs: [String]    // 이 계정을 쓰는 환경들의 id (stats 합산용)
+    let environmentNames: [String]  // 이 계정을 쓰는 환경들의 displayName (표시용)
+    var rateLimits: RateLimits
+}
+
 // MARK: - Session State
 
 enum SessionState: String, Codable, CaseIterable {
@@ -357,30 +405,6 @@ struct NotificationHistoryItem: Codable, Identifiable, Equatable {
         case milestone
         case weeklyReport
         case usageAlert
-    }
-}
-
-// MARK: - Badge (뱃지)
-
-struct Badge: Identifiable, Equatable {
-    let id: String
-    let icon: String
-    let name: String
-    let nameEn: String
-    let description: String
-    let descriptionEn: String
-    let category: BadgeCategory
-    var achievedAt: Date?
-
-    var isAchieved: Bool { achievedAt != nil }
-
-    var localizedName: String { L.lang == .korean ? name : nameEn }
-    var localizedDescription: String { L.lang == .korean ? description : descriptionEn }
-
-    enum BadgeCategory {
-        case dailyPeak   // 일간 최고 기록
-        case streak      // 연속 사용
-        case totalCost   // 누적 비용
     }
 }
 
