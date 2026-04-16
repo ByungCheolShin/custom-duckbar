@@ -291,20 +291,34 @@ struct SessionDiscovery {
             else { continue }
 
             // rate_limits 파싱 (가장 최신 타임스탬프 기준)
+            // primary = 5시간 (window_minutes=300), secondary = 1주 (window_minutes=10080)
             if let rl = payload["rate_limits"] as? [String: Any],
-               let primary = rl["primary"] as? [String: Any],
                let timestampStr = obj["timestamp"] as? String,
                let timestamp = parseISO8601(timestampStr) {
                 if latestRateLimitTimestamp == nil || timestamp > latestRateLimitTimestamp! {
                     latestRateLimitTimestamp = timestamp
                     var codexRL = CodexRateLimits()
-                    codexRL.usedPercent = primary["used_percent"] as? Double ?? 0
-                    codexRL.windowMinutes = primary["window_minutes"] as? Int ?? 10080
-                    if let resetsAtEpoch = primary["resets_at"] as? Double {
-                        codexRL.resetsAt = Date(timeIntervalSince1970: resetsAtEpoch)
-                    } else if let resetsAtEpoch = primary["resets_at"] as? Int {
-                        codexRL.resetsAt = Date(timeIntervalSince1970: Double(resetsAtEpoch))
+
+                    // primary = 5시간
+                    if let primary = rl["primary"] as? [String: Any] {
+                        codexRL.fiveHourPercent = primary["used_percent"] as? Double ?? 0
+                        if let resetsAtEpoch = primary["resets_at"] as? Double {
+                            codexRL.fiveHourResetsAt = Date(timeIntervalSince1970: resetsAtEpoch)
+                        } else if let resetsAtEpoch = primary["resets_at"] as? Int {
+                            codexRL.fiveHourResetsAt = Date(timeIntervalSince1970: Double(resetsAtEpoch))
+                        }
                     }
+
+                    // secondary = 1주
+                    if let secondary = rl["secondary"] as? [String: Any] {
+                        codexRL.weeklyPercent = secondary["used_percent"] as? Double ?? 0
+                        if let resetsAtEpoch = secondary["resets_at"] as? Double {
+                            codexRL.weeklyResetsAt = Date(timeIntervalSince1970: resetsAtEpoch)
+                        } else if let resetsAtEpoch = secondary["resets_at"] as? Int {
+                            codexRL.weeklyResetsAt = Date(timeIntervalSince1970: Double(resetsAtEpoch))
+                        }
+                    }
+
                     codexRL.planType = rl["plan_type"] as? String ?? ""
                     codexRL.isLoaded = true
                     stats.codexRateLimits = codexRL

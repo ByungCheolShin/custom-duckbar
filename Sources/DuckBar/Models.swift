@@ -368,15 +368,24 @@ struct HourlyTokenData: Identifiable, Equatable {
 // MARK: - Codex Rate Limits
 
 struct CodexRateLimits: Equatable {
-    var usedPercent: Double = 0       // 0.0 ~ 100.0
-    var windowMinutes: Int = 10080    // 기본 1주일
-    var resetsAt: Date? = nil
+    // 5시간 rolling (primary)
+    var fiveHourPercent: Double = 0
+    var fiveHourResetsAt: Date? = nil
+    // 1주 rolling (secondary)
+    var weeklyPercent: Double = 0
+    var weeklyResetsAt: Date? = nil
     var planType: String = ""
     var isLoaded: Bool = false
 
-    var resetString: String {
-        guard let resetsAt else { return "—" }
-        let diff = resetsAt.timeIntervalSinceNow
+    // 하위 호환: 기존 코드가 참조하던 usedPercent/resetString은 1주 기준으로
+    var usedPercent: Double { weeklyPercent }
+    var resetString: String { formatReset(weeklyResetsAt) }
+    var fiveHourResetString: String { formatReset(fiveHourResetsAt) }
+    var weeklyResetString: String { formatReset(weeklyResetsAt) }
+
+    private func formatReset(_ date: Date?) -> String {
+        guard let date else { return "—" }
+        let diff = date.timeIntervalSinceNow
         guard diff > 0 else { return "—" }
         let days = Int(diff) / 86400
         let hours = (Int(diff) % 86400) / 3600

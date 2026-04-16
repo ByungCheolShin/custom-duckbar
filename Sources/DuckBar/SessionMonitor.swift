@@ -415,8 +415,8 @@ final class SessionMonitor {
                         timestamp: Date(),
                         provider: "codex",
                         account: info.id,
-                        fiveH: nil,
-                        weekly: info.rateLimits.usedPercent
+                        fiveH: info.rateLimits.fiveHourPercent,
+                        weekly: info.rateLimits.weeklyPercent
                     ))
                 }
                 let hist = UsageHistoryStore.shared.load(

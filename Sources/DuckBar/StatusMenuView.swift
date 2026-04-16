@@ -281,26 +281,49 @@ struct StatusMenuView: View {
         }
     }
 
-    /// Codex Rate Limits (stats 파라미터화)
+    /// Codex Rate Limits — 5h + 1w 두 줄
     private func codexRateLimitsViewFor(_ stats: UsageStats) -> some View {
         let rl = stats.codexRateLimits
         return VStack(alignment: .leading, spacing: 6) {
             Text(L.rateLimits)
                 .font(.system(size: 11 * s, weight: .semibold))
                 .foregroundStyle(.secondary)
+
+            // 5-Hour
+            HStack(spacing: 6) {
+                Text("5h")
+                    .font(.system(size: 10 * s, weight: .medium))
+                    .frame(width: 20 * s, alignment: .trailing)
+                ProgressBarView(
+                    value: rl.isLoaded ? rl.fiveHourPercent / 100 : 0,
+                    color: rl.isLoaded ? progressColor(rl.fiveHourPercent) : .gray,
+                    tickCount: 5
+                )
+                Text(rl.isLoaded ? "\(Int(rl.fiveHourPercent))%" : L.noData)
+                    .font(.system(size: 10 * s, weight: .medium, design: .monospaced))
+                    .foregroundStyle(rl.isLoaded ? progressColor(rl.fiveHourPercent) : .secondary)
+                    .frame(width: 32 * s, alignment: .trailing)
+                Text("↻ \(rl.fiveHourResetString)")
+                    .font(.system(size: 9 * s))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 60 * s, alignment: .trailing)
+            }
+
+            // Weekly
             HStack(spacing: 6) {
                 Text("1w")
                     .font(.system(size: 10 * s, weight: .medium))
                     .frame(width: 20 * s, alignment: .trailing)
                 ProgressBarView(
-                    value: rl.isLoaded ? rl.usedPercent / 100 : 0,
-                    color: rl.isLoaded ? progressColor(rl.usedPercent) : .gray
+                    value: rl.isLoaded ? rl.weeklyPercent / 100 : 0,
+                    color: rl.isLoaded ? progressColor(rl.weeklyPercent) : .gray,
+                    tickCount: 7
                 )
-                Text(rl.isLoaded ? "\(Int(rl.usedPercent))%" : L.noData)
+                Text(rl.isLoaded ? "\(Int(rl.weeklyPercent))%" : L.noData)
                     .font(.system(size: 10 * s, weight: .medium, design: .monospaced))
-                    .foregroundStyle(rl.isLoaded ? progressColor(rl.usedPercent) : .secondary)
+                    .foregroundStyle(rl.isLoaded ? progressColor(rl.weeklyPercent) : .secondary)
                     .frame(width: 32 * s, alignment: .trailing)
-                Text("↻ \(rl.resetString)")
+                Text("↻ \(rl.weeklyResetString)")
                     .font(.system(size: 9 * s))
                     .foregroundStyle(.tertiary)
                     .frame(width: 60 * s, alignment: .trailing)
@@ -315,8 +338,8 @@ struct StatusMenuView: View {
             chartSectionHeader(L.chartTabLine)
             RateLimitChartView(
                 history: stats.usageHistory,
-                currentFiveH: nil,
-                currentWeekly: stats.codexRateLimits.isLoaded ? stats.codexRateLimits.usedPercent : nil,
+                currentFiveH: stats.codexRateLimits.isLoaded ? stats.codexRateLimits.fiveHourPercent : nil,
+                currentWeekly: stats.codexRateLimits.isLoaded ? stats.codexRateLimits.weeklyPercent : nil,
                 fontScale: s
             )
             .padding(.horizontal, 14)
@@ -324,14 +347,16 @@ struct StatusMenuView: View {
         }
     }
 
+    // Codex 히트맵은 1w 기준 유지 (5h는 짧은 윈도우라 히트맵에 덜 의미 있음)
+
     private func codexHeatmapChartViewFor(_ stats: UsageStats) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             chartSectionHeader(L.chartTabHeatmap)
             RateLimitHeatmapView(
                 history: stats.usageHistory,
-                useFiveH: false,   // Codex는 1w만
+                useFiveH: true,
                 fontScale: s,
-                tint: .orange
+                tint: .blue   // Claude와 동일하게 파랑 통일
             )
             .padding(.horizontal, 14)
             .padding(.vertical, 8)

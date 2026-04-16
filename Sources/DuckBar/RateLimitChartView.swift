@@ -13,6 +13,8 @@ struct RateLimitChartView: View {
 
     private var s: CGFloat { fontScale }
 
+    @State private var hoverTime: Date? = nil
+
     private struct PlotPoint: Identifiable {
         let id = UUID()
         let time: Date
@@ -73,7 +75,130 @@ struct RateLimitChartView: View {
                 }
             }
         }
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                Rectangle()
+                    .fill(Color.clear)
+                    .contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active(let location):
+                            guard let plotFrame = proxy.plotFrame.map({ geo[$0] }) else { return }
+                            let xInPlot = location.x - plotFrame.origin.x
+                            guard xInPlot >= 0, xInPlot <= plotFrame.width else {
+                                hoverTime = nil
+                                return
+                            }
+                            if let date: Date = proxy.value(atX: xInPlot) {
+                                hoverTime = date
+                            }
+                        case .ended:
+                            hoverTime = nil
+                        }
+                    }
+            }
+        }
+        .chartBackground { proxy in
+            if let hoverTime, let plotFrame = proxy.plotFrame {
+                GeometryReader { geo in
+                    let frame = geo[plotFrame]
+                    if let x = proxy.position(forX: hoverTime) {
+                        let absX = frame.origin.x + x
+                        ZStack(alignment: .topLeading) {
+                            // 수직 가이드 라인
+                            Path { p in
+                                p.move(to: CGPoint(x: absX, y: frame.minY))
+                                p.addLine(to: CGPoint(x: absX, y: frame.maxY))
+                            }
+                            .stroke(Color.primary.opacity(0.3), style: StrokeStyle(lineWidth: 0.8, dash: [3, 3]))
+
+                            // 툴팁
+                            let values = nearestValues(at: hoverTime)
+                            let tooltipX = min(max(absX + 10, frame.minX), frame.maxX - 140)
+                            tooltipView(time: hoverTime, fiveH: values.fiveH, weekly: values.weekly)
+                                .position(x: tooltipX + 70, y: max(frame.minY + 40, 40))
+                        }
+                    }
+                }
+            }
+        }
         .frame(minHeight: 120 * s)
+    }
+
+    /// 주어진 시각에 가장 가까운 history 스냅샷의 5h/1w 값을 반환
+    private func nearestValues(at time: Date) -> (fiveH: Double?, weekly: Double?) {
+        guard !history.isEmpty else { return (nil, nil) }
+
+        // 5h 값이 있는 것 중 가장 가까운
+        var nearestFiveH: (Date, Double)? = nil
+        var nearestWeekly: (Date, Double)? = nil
+        let maxDiff: TimeInterval = 30 * 60  // 30분 이내
+
+        for snap in history {
+            let diff = abs(snap.timestamp.timeIntervalSince(time))
+            if diff > maxDiff { continue }
+            if let v = snap.fiveH {
+                if nearestFiveH == nil || diff < abs(nearestFiveH!.0.timeIntervalSince(time)) {
+                    nearestFiveH = (snap.timestamp, v)
+                }
+            }
+            if let v = snap.weekly {
+                if nearestWeekly == nil || diff < abs(nearestWeekly!.0.timeIntervalSince(time)) {
+                    nearestWeekly = (snap.timestamp, v)
+                }
+            }
+        }
+        return (nearestFiveH?.1, nearestWeekly?.1)
+    }
+
+    private func tooltipView(time: Date, fiveH: Double?, weekly: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(formatTooltipTime(time))
+                .font(.system(size: 9 * s, weight: .semibold))
+                .foregroundStyle(.primary)
+
+            if let fiveH {
+                HStack(spacing: 4) {
+                    Circle().fill(.blue).frame(width: 6, height: 6)
+                    Text("5h:")
+                        .font(.system(size: 9 * s))
+                        .foregroundStyle(.secondary)
+                    Text("\(Int(fiveH))%")
+                        .font(.system(size: 9 * s, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.primary)
+                }
+            }
+            if let weekly {
+                HStack(spacing: 4) {
+                    Circle().fill(.orange).frame(width: 6, height: 6)
+                    Text("1w:")
+                        .font(.system(size: 9 * s))
+                        .foregroundStyle(.secondary)
+                    Text("\(Int(weekly))%")
+                        .font(.system(size: 9 * s, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.primary)
+                }
+            }
+            if fiveH == nil && weekly == nil {
+                Text("—")
+                    .font(.system(size: 9 * s))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color(nsColor: .controlBackgroundColor))
+                .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
+        )
+        .frame(width: 110)
+    }
+
+    private func formatTooltipTime(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "M월 d일 HH:mm"
+        return f.string(from: date)
     }
 
     private func colorFor(series: String) -> Color {
