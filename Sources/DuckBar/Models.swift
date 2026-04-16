@@ -45,6 +45,32 @@ struct EnvironmentOverride: Codable, Equatable {
     }
 }
 
+// MARK: - Codex Environment (멀티 홈 디렉토리 지원)
+
+struct CodexEnvironment: Identifiable, Equatable, Codable, Hashable {
+    let id: String           // 경로 기반 안정 해시
+    let folderName: String   // ".codex", ".codex-vgen"
+    let shortName: String    // "default", "vgen"
+    let path: URL
+    var enabled: Bool = true
+    var accountId: String?   // auth.json의 account_id
+    var email: String?       // JWT에서 추출한 이메일 (자동 라벨)
+    var planType: String?    // "team", "plus" 등
+
+    var displayName: String { email ?? shortName }
+    var isDefault: Bool { folderName == ".codex" }
+}
+
+/// Codex 계정별 집계 정보
+struct CodexAccountInfo: Identifiable, Equatable {
+    let id: String                  // account_id
+    let email: String?              // 자동 라벨
+    let planType: String?
+    let environmentIDs: [String]    // 이 계정을 쓰는 codex 환경들의 id
+    let environmentNames: [String]  // displayName
+    var rateLimits: CodexRateLimits
+}
+
 // MARK: - Menu Bar Environment Mode
 
 enum MenuBarEnvMode: String, CaseIterable, Codable {

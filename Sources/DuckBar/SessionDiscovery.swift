@@ -207,9 +207,11 @@ struct SessionDiscovery {
     // MARK: - Codex Usage
 
     func loadCodexUsageStats(into stats: inout UsageStats) {
-        let home = fm.homeDirectoryForCurrentUser
-        let codexBase = home.appendingPathComponent(".codex")
+        loadCodexUsageStats(into: &stats, codexBase: fm.homeDirectoryForCurrentUser.appendingPathComponent(".codex"))
+    }
 
+    /// 특정 codex 환경 경로에서 사용량 집계
+    func loadCodexUsageStats(into stats: inout UsageStats, codexBase: URL) {
         let sessionDirs = [
             codexBase.appendingPathComponent("sessions"),
             codexBase.appendingPathComponent("archived_sessions")
@@ -1267,5 +1269,98 @@ extension ClaudeEnvironment {
         var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
         CC_SHA256(bytes, CC_LONG(bytes.count), &digest)
         return digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+// MARK: - CodexEnvironment discovery
+
+extension CodexEnvironment {
+    /// 기본 Codex 환경
+    static var defaultEnvironment: CodexEnvironment {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let path = home.appendingPathComponent(".codex")
+        var env = CodexEnvironment(
+            id: ClaudeEnvironment.stableID(for: path),
+            folderName: ".codex",
+            shortName: "default",
+            path: path
+        )
+        let info = readAuthInfo(at: path)
+        env.accountId = info.accountId
+        env.email = info.email
+        env.planType = info.planType
+        return env
+    }
+
+    /// 홈 디렉토리에서 모든 Codex 환경을 자동 발견
+    static func discoverAll(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [CodexEnvironment] {
+        let fm = FileManager.default
+        guard let children = try? fm.contentsOfDirectory(
+            at: home, includingPropertiesForKeys: [.isDirectoryKey]
+        ) else { return [] }
+
+        var envs: [CodexEnvironment] = []
+        for url in children {
+            let name = url.lastPathComponent
+            guard name == ".codex" || name.hasPrefix(".codex-") else { continue }
+            let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+            guard isDir else { continue }
+            // sessions 또는 auth.json 있는지 확인
+            let hasSessions = fm.fileExists(atPath: url.appendingPathComponent("sessions").path)
+            let hasAuth = fm.fileExists(atPath: url.appendingPathComponent("auth.json").path)
+            guard hasSessions || hasAuth else { continue }
+
+            let short = name == ".codex" ? "default" : String(name.dropFirst(".codex-".count))
+            let info = readAuthInfo(at: url)
+            envs.append(CodexEnvironment(
+                id: ClaudeEnvironment.stableID(for: url),
+                folderName: name,
+                shortName: short.isEmpty ? "default" : short,
+                path: url,
+                accountId: info.accountId,
+                email: info.email,
+                planType: info.planType
+            ))
+        }
+
+        if envs.isEmpty { return [] }
+
+        envs.sort { a, b in
+            if a.isDefault != b.isDefault { return a.isDefault }
+            return a.shortName < b.shortName
+        }
+        return envs
+    }
+
+    /// auth.json에서 account_id + JWT의 email/planType 추출
+    private static func readAuthInfo(at codexPath: URL) -> (accountId: String?, email: String?, planType: String?) {
+        let authFile = codexPath.appendingPathComponent("auth.json")
+        guard let data = try? Data(contentsOf: authFile),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return (nil, nil, nil) }
+
+        let tokens = json["tokens"] as? [String: Any]
+        let accountId = tokens?["account_id"] as? String
+
+        // id_token (JWT)에서 email과 planType 추출 (Base64 디코딩)
+        var email: String?
+        var planType: String?
+        if let idToken = tokens?["id_token"] as? String {
+            let parts = idToken.split(separator: ".")
+            if parts.count >= 2 {
+                var base64 = String(parts[1])
+                // Base64 패딩 보정
+                while base64.count % 4 != 0 { base64 += "=" }
+                if let payloadData = Data(base64Encoded: base64),
+                   let payload = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any] {
+                    email = payload["email"] as? String
+                    if let auth = payload["https://api.openai.com/auth"] as? [String: Any] {
+                        planType = auth["chatgpt_plan_type"] as? String
+                    }
+                }
+            }
+        }
+
+        return (accountId, email, planType)
     }
 }

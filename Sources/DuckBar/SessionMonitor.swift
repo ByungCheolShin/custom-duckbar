@@ -18,6 +18,12 @@ final class SessionMonitor {
     var accountRateLimits: [AccountRateLimit] = []
     /// 계정별 합산 통계 (account.id → 그 계정의 모든 환경을 합친 UsageStats)
     var accountStats: [String: UsageStats] = [:]
+    /// Codex 환경 목록
+    var codexEnvironments: [CodexEnvironment] = []
+    /// Codex 계정별 집계
+    var codexAccounts: [CodexAccountInfo] = []
+    /// Codex 계정별 stats (account_id → stats)
+    var codexAccountStats: [String: UsageStats] = [:]
 
     var lastRefresh = Date()
     var isLoading = false
@@ -93,6 +99,9 @@ final class SessionMonitor {
 
         environments = merged
 
+        // Codex 환경 발견
+        codexEnvironments = CodexEnvironment.discoverAll()
+
         // discoveries 재구성 (enabled만)
         var newDiscoveries: [String: SessionDiscovery] = [:]
         for env in merged where env.enabled {
@@ -145,7 +154,7 @@ final class SessionMonitor {
         let discsSnapshot = discoveries
         let envsSnapshot = environments.filter { $0.enabled }
         Task.detached { [weak self] in
-            let result = await Self.loadAllStats(discoveries: discsSnapshot, environments: envsSnapshot)
+            let result = await Self.loadAllStats(discoveries: discsSnapshot, environments: envsSnapshot, codexEnvironments: self?.codexEnvironments ?? [])
             await MainActor.run { [weak self] in
                 self?.applyLoadResult(result)
             }
@@ -175,6 +184,8 @@ final class SessionMonitor {
         usageStats = result.aggregated
         accountRateLimits = result.accountRateLimits
         accountStats = result.accountStats
+        codexAccounts = result.codexAccounts
+        codexAccountStats = result.codexAccountStats
         // environments에 accountKey 반영 (설정 화면 표시용)
         for i in 0..<environments.count {
             if let key = result.accountKeys[environments[i].id] {
@@ -191,11 +202,15 @@ final class SessionMonitor {
         var accountKeys: [String: String]  // env.id → accountKey
         var accountRateLimits: [AccountRateLimit]  // 계정별 rate limit
         var accountStats: [String: UsageStats]  // 계정별 합산 stats
+        // Codex
+        var codexAccounts: [CodexAccountInfo]
+        var codexAccountStats: [String: UsageStats]  // codex account_id → stats
     }
 
     private static func loadAllStats(
         discoveries: [String: SessionDiscovery],
-        environments: [ClaudeEnvironment]
+        environments: [ClaudeEnvironment],
+        codexEnvironments: [CodexEnvironment] = []
     ) async -> LoadResult {
         // 1. 각 환경의 기본 통계(토큰/컨텍스트/모델/AllTime/Codex)는 각자 수집.
         //    Rate limit 단계는 별도로 조율 — 같은 계정이면 1회만 호출 후 공유.
@@ -276,15 +291,91 @@ final class SessionMonitor {
             return a.environmentNames.joined() < b.environmentNames.joined()
         }
 
-        // 2. 전체 합산 계산
-        let aggregated = aggregate(envStatsMap, environments: environments)
+        // 2. Codex 환경별 집계 + 계정 그룹핑
+        var codexAccountInfoList: [CodexAccountInfo] = []
+        var codexAccountStatsMap: [String: UsageStats] = [:]
+
+        if !codexEnvironments.isEmpty {
+            // 환경별 Codex stats 수집
+            var codexEnvStats: [String: UsageStats] = [:]
+            let disc = SessionDiscovery() // Codex 데이터 로드용 (Claude 환경 무관)
+            for cEnv in codexEnvironments where cEnv.enabled {
+                var stats = UsageStats()
+                disc.loadCodexUsageStats(into: &stats, codexBase: cEnv.path)
+                codexEnvStats[cEnv.id] = stats
+            }
+
+            // account_id로 그룹핑
+            var envsByAccount: [String: [CodexEnvironment]] = [:]
+            for cEnv in codexEnvironments where cEnv.enabled {
+                let key = cEnv.accountId ?? cEnv.id
+                envsByAccount[key, default: []].append(cEnv)
+            }
+
+            for (accountId, envGroup) in envsByAccount {
+                // 환경 stats 합산
+                var merged = UsageStats()
+                for cEnv in envGroup {
+                    if let s = codexEnvStats[cEnv.id] {
+                        merged.codexFiveHourTokens.inputTokens += s.codexFiveHourTokens.inputTokens
+                        merged.codexFiveHourTokens.outputTokens += s.codexFiveHourTokens.outputTokens
+                        merged.codexFiveHourTokens.cachedInputTokens += s.codexFiveHourTokens.cachedInputTokens
+                        merged.codexFiveHourTokens.requestCount += s.codexFiveHourTokens.requestCount
+                        merged.codexOneWeekTokens.inputTokens += s.codexOneWeekTokens.inputTokens
+                        merged.codexOneWeekTokens.outputTokens += s.codexOneWeekTokens.outputTokens
+                        merged.codexOneWeekTokens.cachedInputTokens += s.codexOneWeekTokens.cachedInputTokens
+                        merged.codexOneWeekTokens.requestCount += s.codexOneWeekTokens.requestCount
+                        // Rate limit은 같은 계정이면 동일 → 아무 환경이나 사용
+                        if s.codexRateLimits.isLoaded {
+                            merged.codexRateLimits = s.codexRateLimits
+                        }
+                        mergeHourly(into: &merged.codexHourlyData, with: s.codexHourlyData)
+                        mergeHourly(into: &merged.codexWeeklyHourlyData, with: s.codexWeeklyHourlyData)
+                    }
+                }
+
+                let email = envGroup.first(where: { $0.email != nil })?.email
+                let planType = envGroup.first(where: { $0.planType != nil })?.planType
+                let names = envGroup.map { $0.displayName }
+                let ids = envGroup.map { $0.id }
+
+                codexAccountInfoList.append(CodexAccountInfo(
+                    id: accountId,
+                    email: email,
+                    planType: planType,
+                    environmentIDs: ids,
+                    environmentNames: names,
+                    rateLimits: merged.codexRateLimits
+                ))
+                codexAccountStatsMap[accountId] = merged
+            }
+        }
+
+        // 3. 전체 합산 계산 (Claude + Codex 합산의 Codex 부분은 codexAccountStats에서)
+        var aggregated = aggregate(envStatsMap, environments: environments)
+        // Codex 합산은 전체 codex 계정 stats를 합침
+        for (_, cs) in codexAccountStatsMap {
+            aggregated.codexFiveHourTokens.inputTokens += cs.codexFiveHourTokens.inputTokens
+            aggregated.codexFiveHourTokens.outputTokens += cs.codexFiveHourTokens.outputTokens
+            aggregated.codexFiveHourTokens.cachedInputTokens += cs.codexFiveHourTokens.cachedInputTokens
+            aggregated.codexFiveHourTokens.requestCount += cs.codexFiveHourTokens.requestCount
+            aggregated.codexOneWeekTokens.inputTokens += cs.codexOneWeekTokens.inputTokens
+            aggregated.codexOneWeekTokens.outputTokens += cs.codexOneWeekTokens.outputTokens
+            aggregated.codexOneWeekTokens.cachedInputTokens += cs.codexOneWeekTokens.cachedInputTokens
+            aggregated.codexOneWeekTokens.requestCount += cs.codexOneWeekTokens.requestCount
+            if cs.codexRateLimits.isLoaded { aggregated.codexRateLimits = cs.codexRateLimits }
+            mergeHourly(into: &aggregated.codexHourlyData, with: cs.codexHourlyData)
+            mergeHourly(into: &aggregated.codexWeeklyHourlyData, with: cs.codexWeeklyHourlyData)
+        }
 
         return LoadResult(
             envStats: envStatsMap,
             aggregated: aggregated,
             accountKeys: accountKeyByEnv,
             accountRateLimits: accountRateLimitList,
-            accountStats: accountStatsMap
+            accountStats: accountStatsMap,
+            codexAccounts: codexAccountInfoList,
+            codexAccountStats: codexAccountStatsMap
         )
     }
 

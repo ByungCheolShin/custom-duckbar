@@ -109,31 +109,19 @@ struct StatusMenuView: View {
     @ViewBuilder
     private func claudePerAccountRows(showRL: Bool, showChart: Bool) -> some View {
         let accounts = monitor.accountRateLimits
-        if accounts.isEmpty {
-            accountColumnView(
-                label: nil,
-                stats: monitor.usageStats,
-                fiveH: nil,
-                weekly: nil,
-                showRL: showRL,
-                showChart: showChart,
-                fixedWidth: nil
-            )
-        } else if accounts.count == 1 {
-            let acc = accounts[0]
-            let stats = monitor.accountStats[acc.id] ?? monitor.usageStats
-            accountColumnView(
-                label: nil, // 계정 1개면 헤더 생략
-                stats: stats,
-                fiveH: acc.rateLimits.isLoaded ? acc.rateLimits.fiveHourPercent : nil,
-                weekly: acc.rateLimits.isLoaded ? acc.rateLimits.weeklyPercent : nil,
-                showRL: showRL,
-                showChart: showChart,
-                fixedWidth: nil
-            )
-        } else {
-            ScrollView(.horizontal, showsIndicators: true) {
-                HStack(alignment: .top, spacing: 16) {
+        ScrollView(.horizontal, showsIndicators: accounts.count > 1) {
+            HStack(alignment: .top, spacing: 16) {
+                if accounts.isEmpty {
+                    accountColumnView(
+                        label: "Claude",
+                        stats: monitor.usageStats,
+                        fiveH: nil,
+                        weekly: nil,
+                        showRL: showRL,
+                        showChart: showChart,
+                        fixedWidth: accountColumnWidth
+                    )
+                } else {
                     ForEach(Array(accounts.enumerated()), id: \.element.id) { index, acc in
                         let stats = monitor.accountStats[acc.id] ?? UsageStats()
                         accountColumnView(
@@ -147,9 +135,9 @@ struct StatusMenuView: View {
                         )
                     }
                 }
-                .padding(.horizontal, 4)
-                .padding(.vertical, 4)
             }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 4)
         }
     }
 
@@ -242,46 +230,123 @@ struct StatusMenuView: View {
         }
     }
 
-    /// Codex 행: Codex 카드를 가로 스크롤로 (현재 1개지만 확장 가능)
+    /// Codex 계정별 카드 행 (가로 스크롤)
     @ViewBuilder
     private func codexPerAccountRow(showRL: Bool, showChart: Bool) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        let accounts = monitor.codexAccounts
+        ScrollView(.horizontal, showsIndicators: accounts.count > 1) {
             HStack(alignment: .top, spacing: 16) {
-                codexAccountColumnView(showRL: showRL, showChart: showChart, fixedWidth: accountColumnWidth)
+                if accounts.isEmpty {
+                    codexSingleCard(
+                        label: "Codex",
+                        stats: monitor.usageStats,
+                        showRL: showRL,
+                        showChart: showChart,
+                        fixedWidth: accountColumnWidth
+                    )
+                } else {
+                    ForEach(accounts) { acc in
+                        let stats = monitor.codexAccountStats[acc.id] ?? UsageStats()
+                        codexSingleCard(
+                            label: acc.email ?? "Codex (\(acc.id.prefix(6)))",
+                            stats: stats,
+                            showRL: showRL,
+                            showChart: showChart,
+                            fixedWidth: accountColumnWidth
+                        )
+                    }
+                }
             }
             .padding(.horizontal, 4)
             .padding(.vertical, 4)
         }
     }
 
-    /// Codex 계정 카드 — Claude 카드와 동일 사이즈/스타일
+    /// Codex 단일 계정 카드 (세로: 라벨 → 사용한도 → 라인 → 히트맵)
     @ViewBuilder
-    private func codexAccountColumnView(showRL: Bool, showChart: Bool, fixedWidth: CGFloat?) -> some View {
+    private func codexSingleCard(label: String, stats: UsageStats,
+                                  showRL: Bool, showChart: Bool,
+                                  fixedWidth: CGFloat?) -> some View {
         let content = VStack(alignment: .leading, spacing: 4) {
-            Text("Codex")
+            Text(label)
                 .font(.system(size: 11 * s, weight: .bold))
                 .foregroundStyle(.primary)
                 .padding(.horizontal, 14)
                 .padding(.top, 6)
             if showRL {
-                codexRateLimitsView
+                codexRateLimitsViewFor(stats)
             }
             if showChart {
-                codexLineChartView()
-                codexHeatmapChartView()
+                codexLineChartViewFor(stats)
+                codexHeatmapChartViewFor(stats)
             }
         }
 
         if let w = fixedWidth {
             content
                 .frame(width: w, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.primary.opacity(0.03))
-                )
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.03)))
         } else {
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
+            content.frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// Codex Rate Limits (stats 파라미터화)
+    private func codexRateLimitsViewFor(_ stats: UsageStats) -> some View {
+        let rl = stats.codexRateLimits
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(L.rateLimits)
+                .font(.system(size: 11 * s, weight: .semibold))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Text("1w")
+                    .font(.system(size: 10 * s, weight: .medium))
+                    .frame(width: 20 * s, alignment: .trailing)
+                ProgressBarView(
+                    value: rl.isLoaded ? rl.usedPercent / 100 : 0,
+                    color: rl.isLoaded ? progressColor(rl.usedPercent) : .gray
+                )
+                Text(rl.isLoaded ? "\(Int(rl.usedPercent))%" : L.noData)
+                    .font(.system(size: 10 * s, weight: .medium, design: .monospaced))
+                    .foregroundStyle(rl.isLoaded ? progressColor(rl.usedPercent) : .secondary)
+                    .frame(width: 32 * s, alignment: .trailing)
+                Text("↻ \(rl.resetString)")
+                    .font(.system(size: 9 * s))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 60 * s, alignment: .trailing)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+
+    private func codexLineChartViewFor(_ stats: UsageStats) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            chartSectionHeader(L.chartTabLine)
+            RateLimitChartView(
+                hourlyData: stats.codexHourlyData,
+                weeklyHourlyData: stats.codexWeeklyHourlyData,
+                fiveHourPercent: nil,
+                weeklyPercent: stats.codexRateLimits.isLoaded ? stats.codexRateLimits.usedPercent : nil,
+                fontScale: s
+            )
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private func codexHeatmapChartViewFor(_ stats: UsageStats) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            chartSectionHeader(L.chartTabHeatmap)
+            RateLimitHeatmapView(
+                weeklyHourlyData: stats.codexWeeklyHourlyData,
+                currentPercent: stats.codexRateLimits.isLoaded ? stats.codexRateLimits.usedPercent : nil,
+                rollingHours: 168,
+                fontScale: s,
+                tint: .orange
+            )
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
         }
     }
 
@@ -432,69 +497,6 @@ struct StatusMenuView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-    }
-
-    // MARK: - Codex Rate Limits
-
-    private var codexRateLimitsView: some View {
-        let rl = monitor.usageStats.codexRateLimits
-        return VStack(alignment: .leading, spacing: 6) {
-            Text(L.rateLimits)
-                .font(.system(size: 11 * s, weight: .semibold))
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 6) {
-                Text("1w")
-                    .font(.system(size: 10 * s, weight: .medium))
-                    .frame(width: 20 * s, alignment: .trailing)
-                ProgressBarView(
-                    value: rl.isLoaded ? rl.usedPercent / 100 : 0,
-                    color: rl.isLoaded ? progressColor(rl.usedPercent) : .gray
-                )
-                Text(rl.isLoaded ? "\(Int(rl.usedPercent))%" : L.noData)
-                    .font(.system(size: 10 * s, weight: .medium, design: .monospaced))
-                    .foregroundStyle(rl.isLoaded ? progressColor(rl.usedPercent) : .secondary)
-                    .frame(width: 32 * s, alignment: .trailing)
-                Text("↻ \(rl.resetString)")
-                    .font(.system(size: 9 * s))
-                    .foregroundStyle(.tertiary)
-                    .frame(width: 60 * s, alignment: .trailing)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-    }
-
-    // MARK: - Codex Chart
-
-    private func codexLineChartView() -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            chartSectionHeader(L.chartTabLine)
-            RateLimitChartView(
-                hourlyData: monitor.usageStats.codexHourlyData,
-                weeklyHourlyData: monitor.usageStats.codexWeeklyHourlyData,
-                fiveHourPercent: nil,
-                weeklyPercent: monitor.usageStats.codexRateLimits.isLoaded ? monitor.usageStats.codexRateLimits.usedPercent : nil,
-                fontScale: s
-            )
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-        }
-    }
-
-    private func codexHeatmapChartView() -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            chartSectionHeader(L.chartTabHeatmap)
-            RateLimitHeatmapView(
-                weeklyHourlyData: monitor.usageStats.codexWeeklyHourlyData,
-                currentPercent: monitor.usageStats.codexRateLimits.isLoaded ? monitor.usageStats.codexRateLimits.usedPercent : nil,
-                rollingHours: 168,
-                fontScale: s,
-                tint: .orange
-            )
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-        }
     }
 
     private func chartSectionHeader(_ title: String) -> some View {
