@@ -20,15 +20,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyUpdateSettings()
         monitor = SessionMonitor()
 
+        // 항상 Both 모드 강제
+        settings.activeProvider = .both
+
         // 환경 override 읽기 콜백 연결
         monitor.environmentOverrideProvider = { [weak self] in
             self?.settings.environmentOverrides ?? [:]
+        }
+        monitor.envGroupProvider = { [weak self] in
+            self?.settings.claudeEnvGroups ?? [:]
+        }
+        monitor.groupAliasProvider = { [weak self] in
+            self?.settings.claudeGroupAliases ?? [:]
         }
 
         // 메인 윈도우 준비
         mainWindowController = MainWindowController(monitor: monitor, settings: settings) {
             NSApplication.shared.terminate(nil)
         }
+
+        // 앱 메뉴 설정 (DuckBar > 설정...)
+        setupMainMenu()
 
         // 앱 실행 시 창을 자동으로 한 번 표시
         mainWindowController.show()
@@ -176,6 +188,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         hotKey = hk
+    }
+
+    // MARK: - 앱 메뉴
+
+    private func setupMainMenu() {
+        let mainMenu = NSMenu()
+
+        // DuckBar 앱 메뉴
+        let appMenu = NSMenu()
+        let appMenuItem = NSMenuItem()
+        appMenuItem.submenu = appMenu
+
+        appMenu.addItem(withTitle: L.about, action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(NSMenuItem.separator())
+
+        let settingsItem = NSMenuItem(title: L.settings + "...", action: #selector(openSettingsAction), keyEquivalent: ",")
+        settingsItem.target = self
+        appMenu.addItem(settingsItem)
+
+        appMenu.addItem(NSMenuItem.separator())
+
+        let quitItem = NSMenuItem(title: L.quit, action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(quitItem)
+
+        mainMenu.addItem(appMenuItem)
+
+        // Window 메뉴
+        let windowMenu = NSMenu(title: "Window")
+        let windowMenuItem = NSMenuItem()
+        windowMenuItem.submenu = windowMenu
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.zoom(_:)), keyEquivalent: "")
+        mainMenu.addItem(windowMenuItem)
+        NSApp.windowsMenu = windowMenu
+
+        NSApp.mainMenu = mainMenu
+    }
+
+    @objc private func openSettingsAction() {
+        mainWindowController.show()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            NotificationCenter.default.post(name: .openSettings, object: nil)
+        }
     }
 
     private func toggleMainWindow() {

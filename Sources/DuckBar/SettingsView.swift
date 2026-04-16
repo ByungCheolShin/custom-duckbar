@@ -113,38 +113,8 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
 
-                // Provider
-                VStack(alignment: .leading, spacing: 8) {
-                    Label {
-                        Text(L.provider)
-                            .font(.system(size: 11, weight: .semibold))
-                    } icon: {
-                        Image(systemName: "cpu")
-                            .font(.system(size: 10))
-                    }
-                    .foregroundStyle(.secondary)
-
-                    HStack(spacing: 6) {
-                        ForEach(Provider.allCases, id: \.rawValue) { p in
-                            SegmentButton(isSelected: settings.activeProvider == p,
-                                          title: p.displayName, fontSize: 12, padding: 6) {
-                                settings.activeProvider = p
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-
-                Divider()
-
                 // Claude Environments (멀티 홈 디렉토리)
                 environmentsSection
-
-                Divider()
-
-                // Claude Accounts (계정 별칭)
-                accountsSection
 
                 Divider()
 
@@ -523,15 +493,72 @@ struct SettingsView: View {
                 environmentRow(env)
             }
 
+            // 그룹 별칭 입력
+            if !usedGroups.isEmpty {
+                Divider().padding(.vertical, 4)
+                Text(L.accountsTitle)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(usedGroups, id: \.self) { group in
+                    HStack(spacing: 6) {
+                        Text("\(group)")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.white)
+                            .frame(width: 20, height: 20)
+                            .background(Circle().fill(groupColor(group)))
+                        TextField(L.accountAliasPlaceholder, text: Binding(
+                            get: { settings.claudeGroupAliases[group] ?? "" },
+                            set: { newVal in
+                                if newVal.isEmpty {
+                                    settings.claudeGroupAliases.removeValue(forKey: group)
+                                } else {
+                                    settings.claudeGroupAliases[group] = newVal
+                                }
+                            }
+                        ))
+                        .font(.system(size: 11))
+                        .textFieldStyle(.plain)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
+                }
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
 
+    /// 현재 사용 중인 그룹 번호 (정렬)
+    private var usedGroups: [Int] {
+        Array(Set(settings.claudeEnvGroups.values)).sorted()
+    }
+
+    private func groupColor(_ group: Int) -> Color {
+        let colors: [Color] = [.blue, .orange, .green, .purple, .pink, .cyan]
+        return colors[(group - 1) % colors.count]
+    }
+
     @ViewBuilder
     private func environmentRow(_ env: ClaudeEnvironment) -> some View {
         let override = settings.environmentOverrides[env.id] ?? EnvironmentOverride(alias: nil, enabled: true)
+        let currentGroup = settings.claudeEnvGroups[env.id] ?? 0
         HStack(spacing: 8) {
+            // 그룹 번호 Picker
+            Picker("", selection: Binding(
+                get: { currentGroup },
+                set: { settings.claudeEnvGroups[env.id] = $0 == 0 ? nil : $0 }
+            )) {
+                Text("—").tag(0)
+                ForEach(1...5, id: \.self) { n in
+                    Text("\(n)").tag(n)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(width: 44)
+            .controlSize(.small)
+
             Toggle("", isOn: Binding(
                 get: { override.enabled },
                 set: { newVal in
@@ -545,31 +572,21 @@ struct SettingsView: View {
             .labelsHidden()
 
             VStack(alignment: .leading, spacing: 1) {
-                TextField(env.shortName, text: Binding(
-                    get: { override.alias ?? "" },
-                    set: { newVal in
-                        var o = settings.environmentOverrides[env.id] ?? EnvironmentOverride()
-                        o.alias = newVal.isEmpty ? nil : newVal
-                        settings.environmentOverrides[env.id] = o
-                    }
-                ))
-                .font(.system(size: 11))
-                .textFieldStyle(.plain)
+                Text(env.displayName)
+                    .font(.system(size: 11, weight: .medium))
 
                 Text(env.folderName)
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
-                    .truncationMode(.head)
             }
 
-            if env.isDefault {
-                Text("default")
-                    .font(.system(size: 8, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(RoundedRectangle(cornerRadius: 3).fill(Color.secondary.opacity(0.15)))
+            Spacer()
+
+            if currentGroup > 0 {
+                Circle()
+                    .fill(groupColor(currentGroup))
+                    .frame(width: 8, height: 8)
             }
         }
         .padding(.horizontal, 6)
@@ -584,63 +601,4 @@ struct SettingsView: View {
         NotificationCenter.default.post(name: .environmentOverridesChanged, object: nil)
     }
 
-    // MARK: - Claude Accounts Section (계정별 별칭)
-
-    @ViewBuilder
-    private var accountsSection: some View {
-        let accounts = monitor.accountRateLimits
-        VStack(alignment: .leading, spacing: 8) {
-            Label {
-                Text(L.accountsTitle)
-                    .font(.system(size: 11, weight: .semibold))
-            } icon: {
-                Image(systemName: "person.crop.circle")
-                    .font(.system(size: 10))
-            }
-            .foregroundStyle(.secondary)
-
-            if accounts.isEmpty {
-                Text("—")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-            } else {
-                ForEach(Array(accounts.enumerated()), id: \.element.id) { index, acc in
-                    accountRow(index: index + 1, account: acc)
-                }
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-    }
-
-    @ViewBuilder
-    private func accountRow(index: Int, account: AccountRateLimit) -> some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
-                TextField(L.accountFallback(index), text: Binding(
-                    get: { settings.accountAliases[account.id] ?? "" },
-                    set: { newVal in
-                        let trimmed = newVal.trimmingCharacters(in: .whitespaces)
-                        if trimmed.isEmpty {
-                            settings.accountAliases.removeValue(forKey: account.id)
-                        } else {
-                            settings.accountAliases[account.id] = trimmed
-                        }
-                    }
-                ))
-                .font(.system(size: 11))
-                .textFieldStyle(.plain)
-
-                // "사용 환경: default, baroitda"
-                Text("\(L.accountUsedBy): \(account.environmentNames.joined(separator: ", "))")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
-    }
 }

@@ -269,6 +269,19 @@ final class AppSettings {
         didSet { save() }
     }
 
+    /// Claude 환경 → 그룹 번호 (env.id → group number, 1-based). 같은 번호 = 같은 계정.
+    var claudeEnvGroups: [String: Int] {
+        didSet {
+            save()
+            NotificationCenter.default.post(name: .environmentOverridesChanged, object: nil)
+        }
+    }
+
+    /// 그룹 번호 → 별칭 (예: 1 → "개인", 2 → "회사")
+    var claudeGroupAliases: [Int: String] {
+        didSet { save() }
+    }
+
     private let defaults = UserDefaults.standard
 
     private init() {
@@ -360,6 +373,23 @@ final class AppSettings {
         } else {
             accountAliases = [:]
         }
+
+        if let data = defaults.data(forKey: "claudeEnvGroups"),
+           let dict = try? JSONDecoder().decode([String: Int].self, from: data) {
+            claudeEnvGroups = dict
+        } else {
+            claudeEnvGroups = [:]
+        }
+
+        if let data = defaults.data(forKey: "claudeGroupAliases"),
+           let dict = try? JSONDecoder().decode([String: String].self, from: data) {
+            // JSON keys are strings, convert to Int
+            claudeGroupAliases = Dictionary(uniqueKeysWithValues: dict.compactMap { k, v in
+                Int(k).map { ($0, v) }
+            })
+        } else {
+            claudeGroupAliases = [:]
+        }
     }
 
     private func save() {
@@ -400,6 +430,14 @@ final class AppSettings {
         }
         if let data = try? JSONEncoder().encode(accountAliases) {
             defaults.set(data, forKey: "accountAliases")
+        }
+        if let data = try? JSONEncoder().encode(claudeEnvGroups) {
+            defaults.set(data, forKey: "claudeEnvGroups")
+        }
+        // Int keys → String keys for JSON
+        let groupAliasesStr = Dictionary(uniqueKeysWithValues: claudeGroupAliases.map { (String($0), $1) })
+        if let data = try? JSONEncoder().encode(groupAliasesStr) {
+            defaults.set(data, forKey: "claudeGroupAliases")
         }
     }
 }

@@ -48,9 +48,6 @@ struct StatusMenuView: View {
 
     private var mainView: some View {
         VStack(alignment: .leading, spacing: 0) {
-            headerView
-            Divider()
-
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     // 계정별 카드 — 가로 스크롤, 각 카드 세로 스택
@@ -74,31 +71,6 @@ struct StatusMenuView: View {
         }
     }
 
-    // MARK: - Header
-
-    private var headerView: some View {
-        HStack {
-            Text(L.appTitle)
-                .font(.system(size: 13 * s, weight: .semibold))
-            Spacer()
-            Button(action: { Task { await monitor.refreshAsync() } }) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11 * s))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help(L.refresh)
-            Button(action: { viewMode = .settings }) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 11 * s))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help(L.settings)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-    }
 
     /// 각 계정별 고정 컬럼 폭 (가로 스크롤 시)
     private var accountColumnWidth: CGFloat { 420 }
@@ -151,13 +123,23 @@ struct StatusMenuView: View {
                                     showChart: Bool,
                                     fixedWidth: CGFloat?) -> some View {
         let content = VStack(alignment: .leading, spacing: 4) {
-            if let label {
-                Text(label)
-                    .font(.system(size: 11 * s, weight: .bold))
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 14)
-                    .padding(.top, 6)
+            HStack {
+                if let label {
+                    Text(label)
+                        .font(.system(size: 11 * s, weight: .bold))
+                        .foregroundStyle(.primary)
+                }
+                Spacer()
+                Button(action: { Task { await monitor.refreshAsync() } }) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 10 * s))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help(L.refresh)
             }
+            .padding(.horizontal, 14)
+            .padding(.top, 6)
             if showRL {
                 rateLimitsViewForAccount(fiveH: fiveH, weekly: weekly)
             }
@@ -268,11 +250,21 @@ struct StatusMenuView: View {
                                   showRL: Bool, showChart: Bool,
                                   fixedWidth: CGFloat?) -> some View {
         let content = VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.system(size: 11 * s, weight: .bold))
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 14)
-                .padding(.top, 6)
+            HStack {
+                Text(label)
+                    .font(.system(size: 11 * s, weight: .bold))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Button(action: { Task { await monitor.refreshAsync() } }) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 10 * s))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help(L.refresh)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 6)
             if showRL {
                 codexRateLimitsViewFor(stats)
             }
@@ -353,10 +345,24 @@ struct StatusMenuView: View {
     // MARK: - Rate Limits (계정 단위)
 
     /// Claude Rate Limit 섹션. 탭 선택과 무관하게 계정 단위로 표시.
-    /// 계정의 표시 라벨: 사용자가 지정한 별칭 > "계정 #N"
+    /// 계정 카드의 표시 라벨: 그룹 별칭 > 환경 이름 나열
     private func accountLabel(for account: AccountRateLimit, index: Int) -> String {
+        // group-N 형태면 그룹 별칭 우선
+        if account.id.hasPrefix("group-"),
+           let groupNum = Int(account.id.dropFirst("group-".count)),
+           let alias = settings.claudeGroupAliases[groupNum], !alias.isEmpty {
+            return alias
+        }
+        // accountAliases에서 찾기 (레거시)
         if let alias = settings.accountAliases[account.id], !alias.isEmpty {
             return alias
+        }
+        // 환경 이름 1개면 그 이름, 여러개면 첫번째 + 수
+        if account.environmentNames.count == 1 {
+            return account.environmentNames[0]
+        }
+        if let first = account.environmentNames.first {
+            return "\(first) +\(account.environmentNames.count - 1)"
         }
         return L.accountFallback(index)
     }

@@ -41,6 +41,10 @@ final class SessionMonitor {
 
     /// 환경별 설정을 외부(AppSettings)에서 읽어오기 위한 콜백 주입
     var environmentOverrideProvider: (() -> [String: EnvironmentOverride])?
+    /// 환경 그룹 설정 콜백 (env.id → group number)
+    var envGroupProvider: (() -> [String: Int])?
+    /// 그룹 별칭 콜백 (group number → alias)
+    var groupAliasProvider: (() -> [Int: String])?
 
     var aggregateState: SessionState {
         sessions.map(\.state).max(by: { $0.priority < $1.priority }) ?? .idle
@@ -150,11 +154,20 @@ final class SessionMonitor {
     func refreshSync() {
         refreshSessionsOnly()
 
-        // 무거운 통계는 백그라운드
+        // MainActor에서 미리 캡처
         let discsSnapshot = discoveries
         let envsSnapshot = environments.filter { $0.enabled }
+        let codexEnvsSnapshot = codexEnvironments
+        let envGroupsSnapshot = envGroupProvider?() ?? [:]
+        let groupAliasesSnapshot = groupAliasProvider?() ?? [:]
         Task.detached { [weak self] in
-            let result = await Self.loadAllStats(discoveries: discsSnapshot, environments: envsSnapshot, codexEnvironments: self?.codexEnvironments ?? [])
+            let result = await Self.loadAllStats(
+                discoveries: discsSnapshot,
+                environments: envsSnapshot,
+                codexEnvironments: codexEnvsSnapshot,
+                envGroups: envGroupsSnapshot,
+                groupAliases: groupAliasesSnapshot
+            )
             await MainActor.run { [weak self] in
                 self?.applyLoadResult(result)
             }
@@ -166,10 +179,20 @@ final class SessionMonitor {
         isLoading = true
         refreshSessionsOnly()
 
+        // MainActor에서 미리 캡처
         let discsSnapshot = discoveries
         let envsSnapshot = environments.filter { $0.enabled }
+        let codexEnvsSnapshot = codexEnvironments
+        let envGroupsSnapshot = envGroupProvider?() ?? [:]
+        let groupAliasesSnapshot = groupAliasProvider?() ?? [:]
         let result = await Task.detached {
-            await Self.loadAllStats(discoveries: discsSnapshot, environments: envsSnapshot)
+            await Self.loadAllStats(
+                discoveries: discsSnapshot,
+                environments: envsSnapshot,
+                codexEnvironments: codexEnvsSnapshot,
+                envGroups: envGroupsSnapshot,
+                groupAliases: groupAliasesSnapshot
+            )
         }.value
 
         applyLoadResult(result)
@@ -210,85 +233,98 @@ final class SessionMonitor {
     private static func loadAllStats(
         discoveries: [String: SessionDiscovery],
         environments: [ClaudeEnvironment],
-        codexEnvironments: [CodexEnvironment] = []
+        codexEnvironments: [CodexEnvironment] = [],
+        envGroups: [String: Int] = [:],
+        groupAliases: [Int: String] = [:]
     ) async -> LoadResult {
-        // 1. 각 환경의 기본 통계(토큰/컨텍스트/모델/AllTime/Codex)는 각자 수집.
-        //    Rate limit 단계는 별도로 조율 — 같은 계정이면 1회만 호출 후 공유.
+        // 1. 환경별 기본 stats 집계
         var envStatsMap: [String: UsageStats] = [:]
-        var accountKeyByEnv: [String: String] = [:]
 
-        // 계정 키 → token 매핑 (대표 토큰 기억)
-        var tokenByAccountKey: [String: String] = [:]
-        var envsByAccountKey: [String: [String]] = [:]
-
-        // 토큰 먼저 계산 (Rate limit API 중복 제거용)
-        for env in environments {
-            guard let disc = discoveries[env.id] else { continue }
-            if let token = disc.readAccessTokenForAccountKey() {
-                let key = ClaudeEnvironment.accountKey(fromToken: token)
-                accountKeyByEnv[env.id] = key
-                tokenByAccountKey[key] = token
-                envsByAccountKey[key, default: []].append(env.id)
+        // 사용자 그룹 기반 그룹핑 (envGroups: env.id → group number)
+        // 같은 그룹의 환경 중 "첫 번째(대표)"만 rate limit API 호출
+        var envsByGroup: [Int: [String]] = [:]      // group → [env.id]
+        var ungroupedEnvs: [String] = []             // 그룹 미지정 환경
+        for env in environments where env.enabled {
+            if let group = envGroups[env.id], group > 0 {
+                envsByGroup[group, default: []].append(env.id)
+            } else {
+                ungroupedEnvs.append(env.id)
             }
         }
 
-        // 환경별 기본 stats 집계 (Rate limit은 기본 로직이 OMC/로컬 캐시 → API 순서이므로 여기서 호출)
-        // 같은 계정의 환경 중 "첫 번째(대표)"만 API 호출을 트리거하게끔 한다.
-        // 대표가 아닌 환경은 rate limit을 skip.
+        // 그룹별 대표 환경 (rate limit 조회용)
         var representativeEnvIds = Set<String>()
-        for (_, envIds) in envsByAccountKey {
-            if let first = envIds.sorted().first { representativeEnvIds.insert(first) }
+        for (_, ids) in envsByGroup {
+            if let first = ids.sorted().first { representativeEnvIds.insert(first) }
         }
+        // 미그룹은 각자가 대표
+        for id in ungroupedEnvs { representativeEnvIds.insert(id) }
 
-        for env in environments {
+        for env in environments where env.enabled {
             guard let disc = discoveries[env.id] else { continue }
             var stats = disc.loadUsageStats()
-            // 대표가 아닌 환경의 rate limit은 대표에서 복사해올 거라 일단 비움
-            if let key = accountKeyByEnv[env.id], !representativeEnvIds.contains(env.id) {
-                _ = key
-                stats.rateLimits = RateLimits()  // 초기화 (대표에서 나중에 복사)
+            // 대표가 아닌 환경의 rate limit은 나중에 대표에서 복사
+            if !representativeEnvIds.contains(env.id) {
+                stats.rateLimits = RateLimits()
             }
             envStatsMap[env.id] = stats
         }
 
-        // Rate limit을 계정 단위로 그룹 공유 + 계정별 목록 수집
+        // 그룹별 rate limit 공유 + AccountRateLimit 목록 수집
         var accountRateLimitList: [AccountRateLimit] = []
         var accountStatsMap: [String: UsageStats] = [:]
         let envIdToName = Dictionary(uniqueKeysWithValues: environments.map { ($0.id, $0.displayName) })
         let envIdToEnv = Dictionary(uniqueKeysWithValues: environments.map { ($0.id, $0) })
 
-        for (key, envIds) in envsByAccountKey {
-            guard let repId = envIds.sorted().first,
+        // 그룹핑된 환경들 처리
+        for (group, envIds) in envsByGroup.sorted(by: { $0.key < $1.key }) {
+            let sortedIds = envIds.sorted()
+            guard let repId = sortedIds.first,
                   let repStats = envStatsMap[repId]
             else { continue }
             let rl = repStats.rateLimits
-            for id in envIds where id != repId {
+            for id in sortedIds where id != repId {
                 envStatsMap[id]?.rateLimits = rl
             }
 
-            // 이 계정을 쓰는 환경들의 displayName을 모음 (enabled 여부와 무관하게 토큰이 있는 모든 환경)
-            let sortedIds = envIds.sorted()
             let names = sortedIds.compactMap { envIdToName[$0] }
+            let groupKey = "group-\(group)"
             accountRateLimitList.append(AccountRateLimit(
-                id: key,
+                id: groupKey,
                 environmentIDs: sortedIds,
                 environmentNames: names,
                 rateLimits: rl
             ))
 
-            // 계정별 stats 합산 — 해당 계정의 모든 환경 envStats를 하나로
-            let envsForAccount = sortedIds.compactMap { envIdToEnv[$0] }
-            var accStats = aggregate(envStatsMap, environments: envsForAccount)
-            accStats.rateLimits = rl  // rate limit은 계정 단위
-            accountStatsMap[key] = accStats
+            // 그룹 stats 합산
+            let envsForGroup = sortedIds.compactMap { envIdToEnv[$0] }
+            var accStats = aggregate(envStatsMap, environments: envsForGroup)
+            accStats.rateLimits = rl
+            accountStatsMap[groupKey] = accStats
         }
 
-        // 계정 표시 순서: 환경 개수 많은 계정 먼저 → 알파벳
-        accountRateLimitList.sort { a, b in
-            if a.environmentNames.count != b.environmentNames.count {
-                return a.environmentNames.count > b.environmentNames.count
+        // 미그룹 환경 → 각자 독립 카드
+        for envId in ungroupedEnvs.sorted() {
+            guard let stats = envStatsMap[envId] else { continue }
+            let name = envIdToName[envId] ?? envId
+            let cardKey = "env-\(envId)"
+            accountRateLimitList.append(AccountRateLimit(
+                id: cardKey,
+                environmentIDs: [envId],
+                environmentNames: [name],
+                rateLimits: stats.rateLimits
+            ))
+            accountStatsMap[cardKey] = stats
+        }
+
+        // accountKeys (하위 호환)
+        var accountKeyByEnv: [String: String] = [:]
+        for env in environments {
+            if let group = envGroups[env.id], group > 0 {
+                accountKeyByEnv[env.id] = "group-\(group)"
+            } else {
+                accountKeyByEnv[env.id] = "env-\(env.id)"
             }
-            return a.environmentNames.joined() < b.environmentNames.joined()
         }
 
         // 2. Codex 환경별 집계 + 계정 그룹핑
